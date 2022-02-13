@@ -1,0 +1,11 @@
+listening_addr = "127.0.0.1:8080"
+peer_addr= "192.168.1.1:80"    
+
+
+[[log_sources]]
+name="test"
+addr = "192.168.30.130"
+port= 1433
+username= "admin"
+pass= "123456"
+query= "select * from test;"
