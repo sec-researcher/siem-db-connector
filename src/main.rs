@@ -98,9 +98,17 @@ async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {    
+async fn main() -> Result<(), Box<dyn Error>> {     
+    use sha2::{Sha256, Digest};
+    let mut hasher = Sha256::new();
+    //hasher.update(b"hello world");
+    //let result = hasher.finalize();
+    //println!("{:x}", result);
+ 
     //Reading configuration and parse it
     let config= std::fs::read_to_string("config.toml").expect("Can not read file").parse::<String>().expect("Error in parsing");
+    hasher.update(config.as_bytes());
+    let config_hash = format!("{:x}",hasher.finalize());
     let config: ConfigData = toml::from_str(&config).unwrap();
 
     let state;
@@ -117,14 +125,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //let partner = args[2].to_owned();
     let listener = TcpListener::bind(&config.listening_addr).await?;
     
-    tokio::spawn(check_partner_status(Arc::clone(&state), config.peer_addr));
+    tokio::spawn(check_partner_status(Arc::clone(&state), config.peer_addr,config_hash.to_owned()));
     for log_source in config.log_sources {
         tokio::spawn(call_db(log_source));
     }
     
     loop {
         let (socket, _) = listener.accept().await?;
-        tokio::spawn(process_incominng(socket, Arc::clone(&state)));
+        tokio::spawn(process_incominng(socket, Arc::clone(&state),config_hash.to_owned()));
     }
     //tokio::spawn(print_events(Arc::clone(&state)));
 }
@@ -177,7 +185,7 @@ async fn call_db(log_source_config:LogSource)  {
     }       
 }
 
-async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String)   {        
+async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, config_hash:String)   {        
     let pause_duration = 2000;
     while *state.lock()==State::MasterWaiting {
         std::thread::sleep(std::time::Duration::from_secs(1));
@@ -212,11 +220,34 @@ async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String)   
                                     }
                                     let message= String::from_utf8(v).unwrap();
                                     v= vec![]; // Redefining v vector because it's borrowed in last statement
-                                        if message!="I'm master\n" {
+                                        if message=="I'm slave\n" {
                                             *state.lock() = State::Master;
                                             println!("This agent go to master mode because incorrect message received from master")
                                         }
                                         else {
+                                            let mut split = "some string 123 ffd".split("123");
+                                            let message = message.split("\n").collect::<Vec<&str>>();
+                                            if message.len()==2 {
+                                                if message[1]!=config_hash {
+                                                    match socket.write_all(&format!("New config").as_bytes()).await {
+                                                        Ok(n) => {
+                                                            match time::timeout(Duration::from_secs(2), socket.read(&mut buf)).await.unwrap_or(Ok(0)) {   
+                                                                Ok(n) => {
+                                                                    let mut vv= vec![]; 
+                                                                    for i in 0..n {
+                                                                        vv.push(buf[i]);               
+                                                                    }
+                                                                    let data= String::from_utf8(vv).unwrap();
+                                                                    std::fs::write("./config.toml", data).expect("Unable to write to config.toml");
+                                                                },
+                                                                Err(e) => println!("Error in receiving new config")
+                                                            }
+                                                            
+                                                        },
+                                                        Err(e) => println!("Error in requesting new config")
+                                                    }
+                                                }
+                                            }
                                             println!("This agent go to slave mode, Because other side is in master mode");
                                             *state.lock() = State::Slave;
                                         }
@@ -246,7 +277,7 @@ async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String)   
     };   
 }
 
-async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>) {
+async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>,config_hash:String) {
     {        
         let mut buf = [0; 256];            
         let mut v = Vec::new();
@@ -270,7 +301,7 @@ async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<Sta
                 if message=="What's up?\n" {
                     println!("whats up received");
                     if *state.lock()==State::Master || *state.lock()==State::MasterWaiting {
-                        match socket.write_all(&format!("I'm master\n").as_bytes()).await {
+                        match socket.write_all(&format!("I'm master\n{}",config_hash).as_bytes()).await {
                             Ok(_) => {
                                 *state.lock() = State::Master; //??Can be optimized
                                 println!("Message sent to client")
@@ -284,6 +315,14 @@ async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<Sta
                             Err(e) => println!("Error on writing data to client connection, Error: {}", e)
                         }                        
                     }                    
+                }
+                else if message=="New config" {
+                    let config= std::fs::read_to_string("config.toml").expect("Can not read file").parse::<String>().expect("Error in parsing");
+                    match socket.write_all(config.as_bytes()).await {
+                        Ok(_) => println!("New config sent"),
+                        Err(e) => println!("Error in sending config, Error: {}",e)
+                    }
+
                 }
         }
     }

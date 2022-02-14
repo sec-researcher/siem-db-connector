@@ -17,3 +17,5 @@ static_vcruntime = "1.5"
 serde_derive = "*"
 serde="*"
 toml="*"
+#Hash calculation
+sha2="*"
