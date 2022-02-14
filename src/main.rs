@@ -23,6 +23,7 @@ use serde_derive::Deserialize;
 struct ConfigData {
     listening_addr: String,
     peer_addr: String,   
+    app_socket: String,
     log_sources: Vec<LogSource>
 }
 #[derive(Deserialize)]
@@ -34,17 +35,78 @@ struct LogSource {
     pass: String,
     query: String
 }
+fn init(app_socket: String,state:Arc<Mutex<State>>)
+{
+    use std::os::unix::net::{UnixStream, UnixListener};
+    use std::io::prelude::*; //Allow us to read and write from Unix sockets.
+    //Check if another instance is running
+    
+    match UnixStream::connect(&app_socket) {
+        Ok(mut stream) => {
+            println!("Another instance is running..");
+            let mut response = String::new();
+            stream.read_to_string(&mut response).expect("Error happend in reading response from unix socket");
+            println!("{}", response);
+            std::process::exit(0);
+        },
+        //If error happenes means there is no other instance running
+        Err(e) => {
+            println!("Go to listening mode, Error: {}",e);
+            tokio::spawn(unix_socket_listener(app_socket, state));
+        }
+    }
+}
+
+async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
+    use std::os::unix::net::{UnixStream, UnixListener};
+    use std::io::prelude::*; //Allow us to read and write from Unix sockets.    
+    if std::path::Path::new(&app_socket).exists() {
+        std::fs::remove_file(&app_socket).expect("Can not delete file")
+    }
+    let listener = UnixListener::bind(&app_socket).expect("Can not bind to unix socket");
+    //Set read only permision on file to protect if from accidental deletion.
+    //let mut perms = std::fs::metadata(&config.app_socket).expect("Can not get socket permission.").permissions();
+    //perms.set_readonly(true);
+    //std::fs::set_permissions(&config.app_socket,perms).expect("Can not set readonly permission.");
+     
+    // accept connections and process them, spawning a new thread for each one
+    for stream in listener.incoming() {
+        match stream {
+            Ok(mut stream) => {
+                /* connection succeeded */
+                let state = Arc::clone(&state);
+                std::thread::spawn(move || {
+                    let msg;
+                    if *state.lock()==State::Master {
+                        msg = format!("Agent is Master.");
+                    }
+                    else {
+                        msg = format!("Agent is Slave.");
+                    }
+                    stream.write_all( msg.as_bytes() ).expect("Error in writing to unix socket")
+                });
+            }
+            Err(err) => {
+                /* connection failed */
+                break;
+            }
+        }
+    }
+}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    let state = Arc::new(Mutex::new(State::Master));
+    //Reading configuration and parse it
     let config= std::fs::read_to_string("config.toml").expect("Can not read file").parse::<String>().expect("Error in parsing");
     let config: ConfigData = toml::from_str(&config).unwrap();
-
+    
+    init(config.app_socket,Arc::clone(&state));
     //println!("call ./app listening_ip:listening_port remote_ip:remote_port");
     //let args: Vec<String> = env::args().collect();    
     //let partner = args[2].to_owned();
     let listener = TcpListener::bind(&config.listening_addr).await?;
-    let state = Arc::new(Mutex::new(State::Master));
+    
     tokio::spawn(check_partner_status(Arc::clone(&state), config.peer_addr));
     for log_source in config.log_sources {
         tokio::spawn(call_db(log_source));
