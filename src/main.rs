@@ -14,6 +14,7 @@ use parking_lot::Mutex;
 //---------------------------------------------------------
 #[derive(PartialEq,Clone,Copy)]
 enum State {
+    MasterWaiting,
     Master,
     Slave
 }
@@ -24,6 +25,8 @@ struct ConfigData {
     listening_addr: String,
     peer_addr: String,   
     app_socket: String,
+    default_role: String,
+    pause_duration: u16, //In mili second
     log_sources: Vec<LogSource>
 }
 #[derive(Deserialize)]
@@ -37,7 +40,7 @@ struct LogSource {
 }
 fn init(app_socket: String,state:Arc<Mutex<State>>)
 {
-    use std::os::unix::net::{UnixStream, UnixListener};
+    use std::os::unix::net::UnixStream;
     use std::io::prelude::*; //Allow us to read and write from Unix sockets.
     //Check if another instance is running
     
@@ -58,7 +61,7 @@ fn init(app_socket: String,state:Arc<Mutex<State>>)
 }
 
 async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
-    use std::os::unix::net::{UnixStream, UnixListener};
+    use std::os::unix::net::UnixListener;
     use std::io::prelude::*; //Allow us to read and write from Unix sockets.    
     if std::path::Path::new(&app_socket).exists() {
         std::fs::remove_file(&app_socket).expect("Can not delete file")
@@ -95,11 +98,18 @@ async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
 }
 
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn Error>> {
-    let state = Arc::new(Mutex::new(State::Master));
+async fn main() -> Result<(), Box<dyn Error>> {    
     //Reading configuration and parse it
     let config= std::fs::read_to_string("config.toml").expect("Can not read file").parse::<String>().expect("Error in parsing");
     let config: ConfigData = toml::from_str(&config).unwrap();
+
+    let state;
+    if config.default_role=="master" {
+        state = Arc::new(Mutex::new(State::MasterWaiting));
+    }
+    else {
+        state = Arc::new(Mutex::new(State::Slave));
+    }
     
     init(config.app_socket,Arc::clone(&state));
     //println!("call ./app listening_ip:listening_port remote_ip:remote_port");
@@ -118,6 +128,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     //tokio::spawn(print_events(Arc::clone(&state)));
 }
+
+
 
 async fn call_db(log_source_config:LogSource)  {
     let two_seconds = std::time::Duration::from_millis(2000);
@@ -166,9 +178,14 @@ async fn call_db(log_source_config:LogSource)  {
 }
 
 async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String)   {        
+    let pause_duration = 2000;
+    while *state.lock()==State::MasterWaiting {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        println!("Waiting for an slave to connect!!");
+    }
     let mut buf = [0; 256];            
     let mut v = Vec::new();
-    let two_seconds = std::time::Duration::from_millis(2000);
+    let two_seconds = std::time::Duration::from_millis(pause_duration);
     
     // In a loop, read data from the socket and write the data back.
     loop  {
@@ -230,7 +247,7 @@ async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String)   
 }
 
 async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>) {
-    {
+    {        
         let mut buf = [0; 256];            
         let mut v = Vec::new();
         // In a loop, read data from the socket and write the data back.
@@ -252,9 +269,12 @@ async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<Sta
             println!("{}",message);
                 if message=="What's up?\n" {
                     println!("whats up received");
-                    if *state.lock()==State::Master {
+                    if *state.lock()==State::Master || *state.lock()==State::MasterWaiting {
                         match socket.write_all(&format!("I'm master\n").as_bytes()).await {
-                            Ok(_) => println!("Message sent to client"),
+                            Ok(_) => {
+                                *state.lock() = State::Master; //??Can be optimized
+                                println!("Message sent to client")
+                            },
                             Err(e) => println!("Error on writing data to client connection, Error: {}", e)
                         }
                     }

@@ -1,6 +1,8 @@
 listening_addr = "127.0.0.1:8080"
 peer_addr= "192.168.1.1:80"    
 app_socket="/tmp/db"
+pause_duration = 2000
+default_role = "master"
 
 [[log_sources]]
 name="test"
