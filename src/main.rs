@@ -12,7 +12,7 @@ use parking_lot::Mutex;
 //use std::env;
 
 //---------------------------------------------------------
-#[derive(PartialEq,Clone,Copy)]
+#[derive(PartialEq,Clone,Copy,Debug)]
 enum State {
     MasterWaiting,
     Master,
@@ -73,6 +73,7 @@ async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
     //std::fs::set_permissions(&config.app_socket,perms).expect("Can not set readonly permission.");
      
     // accept connections and process them, spawning a new thread for each one
+    println!("Unix socket listener is waiting!!");
     for stream in listener.incoming() {
         match stream {
             Ok(mut stream) => {
@@ -97,7 +98,7 @@ async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
     }
 }
 
-#[tokio::main]
+#[tokio::main(flavor = "multi_thread", worker_threads = 100)]
 async fn main() -> Result<(), Box<dyn Error>> {     
     use sha2::{Sha256, Digest};
     let mut hasher = Sha256::new();
@@ -114,18 +115,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let state;
     if config.default_role=="master" {
         state = Arc::new(Mutex::new(State::MasterWaiting));
+        
     }
     else {
         state = Arc::new(Mutex::new(State::Slave));
     }
     
     init(config.app_socket,Arc::clone(&state));
+    println!("init ended");
     //println!("call ./app listening_ip:listening_port remote_ip:remote_port");
     //let args: Vec<String> = env::args().collect();    
     //let partner = args[2].to_owned();
     let listener = TcpListener::bind(&config.listening_addr).await?;
-    
-    tokio::spawn(check_partner_status(Arc::clone(&state), config.peer_addr,config_hash.to_owned()));
+    println!("Listening on network started!");
+    let x = tokio::spawn(check_partner_status(Arc::clone(&state), config.peer_addr,config_hash.to_owned()));
+    println!("After tokio partner!");
     for log_source in config.log_sources {
         tokio::spawn(call_db(log_source));
     }
@@ -140,6 +144,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 
 async fn call_db(log_source_config:LogSource)  {
+    println!("Call DB");
     let two_seconds = std::time::Duration::from_millis(2000);
     loop {
         let mut config = Config::new();
@@ -187,6 +192,7 @@ async fn call_db(log_source_config:LogSource)  {
 
 async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, config_hash:String)   {        
     let pause_duration = 2000;
+    println!("partner check started");
     while *state.lock()==State::MasterWaiting {
         std::thread::sleep(std::time::Duration::from_secs(1));
         println!("Waiting for an slave to connect!!");
@@ -299,12 +305,15 @@ async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<Sta
             v= vec![]; // Redefining v vector because it's borrowed in last statement
             println!("{}",message);
                 if message=="What's up?\n" {
-                    println!("whats up received");
-                    if *state.lock()==State::Master || *state.lock()==State::MasterWaiting {
+                    println!("whats up received!!!!");
+                    println!("{:?}", *state.lock());
+                    let x = *state.lock();
+                    if *state.lock()!=State::Slave {                        
+                        println!("If passed!");
                         match socket.write_all(&format!("I'm master\n{}",config_hash).as_bytes()).await {
                             Ok(_) => {
                                 *state.lock() = State::Master; //??Can be optimized
-                                println!("Message sent to client")
+                                println!("State set to master")
                             },
                             Err(e) => println!("Error on writing data to client connection, Error: {}", e)
                         }
