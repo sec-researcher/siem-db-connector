@@ -11,3 +11,10 @@ port= 1433
 username= "admin"
 pass= "123456"
 query= "select * from test;"
+[[log_sources]]
+name="amir"
+addr = "192.168.30.140"
+port= 1433
+username= "admin"
+pass= "123456"
+query= "select * from test;"

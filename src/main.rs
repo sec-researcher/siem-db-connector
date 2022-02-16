@@ -246,25 +246,31 @@ async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, co
                                                 if message[1]!=config_hash {
                                                     match socket.write_all(&format!("New config").as_bytes()).await {
                                                         Ok(n) => {
-                                                            match time::timeout(Duration::from_secs(2), socket.read(&mut buf)).await.unwrap_or(Ok(0)) {   
-                                                                Ok(n) => {
-                                                                    let mut vv= vec![]; 
-                                                                    for i in 0..n {
-                                                                        vv.push(buf[i]);               
-                                                                    }
-                                                                    let mut data= String::from_utf8(vv).unwrap();
-                                                                    println!("Query config: {}", data);
-                                                                    let log_sources :LogSources = toml::from_str(&data).unwrap(); 
-                                                                    config.log_sources = log_sources.log_sources;
-                                                                    data = toml::to_string(&config).unwrap();
-                                                                    std::fs::write("./config.toml", data).expect("Unable to write to config.toml");
-                                                                    use std::os::unix::process::CommandExt;
-                                                                    std::process::Command::new("/proc/self/exe").exec();
-                                                                    std::process::exit(0);
-                                                                    
-                                                                },
-                                                                Err(e) => println!("Error in receiving new config")
+                                                            let mut msg="".to_owned();                                                            
+                                                            while msg.len()<9 || &msg[msg.len()-9..]!="***END***" {
+                                                                match time::timeout(Duration::from_secs(2), socket.read(&mut buf)).await.unwrap_or(Ok(0)) {   
+                                                                    Ok(n) => {
+                                                                        let mut vv= vec![]; 
+                                                                        for i in 0..n {
+                                                                            vv.push(buf[i]);               
+                                                                        }
+                                                                        let mut data= String::from_utf8(vv).unwrap();
+                                                                        msg = format!("{}{}", msg,data);
+                                                                    },
+                                                                    Err(e) => println!("Error in receiving new config")
+                                                                }
                                                             }
+
+                                                            if msg.len()>=9 {
+                                                                let log_sources :LogSources = toml::from_str(&msg[..msg.len()-9]).unwrap(); 
+                                                                config.log_sources = log_sources.log_sources;
+                                                                msg = toml::to_string(&config).unwrap();
+                                                                std::fs::write("./config.toml", msg).expect("Unable to write to config.toml");
+                                                                use std::os::unix::process::CommandExt;
+                                                                std::process::Command::new("/proc/self/exe").exec();
+                                                                std::process::exit(0);
+                                                            }
+                                                            
                                                             
                                                         },
                                                         Err(e) => println!("Error in requesting new config")
@@ -343,7 +349,7 @@ async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<Sta
                     }                    
                 }
                 else if message=="New config" {                    
-                    match socket.write_all(log_sources_text.as_bytes()).await {
+                    match socket.write_all(format!("{}***END***",log_sources_text).as_bytes()).await {
                         Ok(_) => println!("New config sent"),
                         Err(e) => println!("Error in sending config, Error: {}",e)
                     }
