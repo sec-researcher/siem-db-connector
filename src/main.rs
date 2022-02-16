@@ -19,8 +19,8 @@ enum State {
     Slave
 }
 
-use serde_derive::Deserialize;
-#[derive(Deserialize)]
+use serde_derive::{Deserialize, Serialize };
+#[derive(Deserialize,Serialize)]
 struct ConfigData {
     listening_addr: String,
     peer_addr: String,   
@@ -29,7 +29,14 @@ struct ConfigData {
     pause_duration: u16, //In mili second
     log_sources: Vec<LogSource>
 }
-#[derive(Deserialize)]
+
+
+#[derive(Deserialize,Serialize)]
+struct LogSources {
+    log_sources: Vec<LogSource>
+}
+
+#[derive(Clone,Deserialize,Serialize)]
 struct LogSource {
     name: String,
     addr: String,
@@ -107,11 +114,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //println!("{:x}", result);
  
     //Reading configuration and parse it
-    let config= std::fs::read_to_string("config.toml").expect("Can not read file").parse::<String>().expect("Error in parsing");
-    hasher.update(config.as_bytes());
+    let config_text= std::fs::read_to_string("config.toml").expect("Can not read file").parse::<String>().expect("Error in parsing");
+    let config: ConfigData = toml::from_str(&config_text).unwrap();
+    let log_sources =  LogSources { log_sources: config.log_sources};
+    let log_sources_text = toml::to_string(&log_sources).unwrap();
+    hasher.update(log_sources_text.as_bytes());
     let config_hash = format!("{:x}",hasher.finalize());
-    let config: ConfigData = toml::from_str(&config).unwrap();
-
     let state;
     if config.default_role=="master" {
         state = Arc::new(Mutex::new(State::MasterWaiting));
@@ -128,15 +136,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     //let partner = args[2].to_owned();
     let listener = TcpListener::bind(&config.listening_addr).await?;
     println!("Listening on network started!");
-    let x = tokio::spawn(check_partner_status(Arc::clone(&state), config.peer_addr,config_hash.to_owned()));
+    let x = tokio::spawn(check_partner_status(Arc::clone(&state), config.peer_addr,config_hash.to_owned(), toml::from_str(&config_text).unwrap()));
     println!("After tokio partner!");
-    for log_source in config.log_sources {
+    for log_source in log_sources.log_sources {
         tokio::spawn(call_db(log_source));
     }
     
     loop {
         let (socket, _) = listener.accept().await?;
-        tokio::spawn(process_incominng(socket, Arc::clone(&state),config_hash.to_owned()));
+        
+        tokio::spawn(process_incominng(socket, Arc::clone(&state),config_hash.to_owned(), log_sources_text.clone()));
     }
     //tokio::spawn(print_events(Arc::clone(&state)));
 }
@@ -190,7 +199,7 @@ async fn call_db(log_source_config:LogSource)  {
     }       
 }
 
-async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, config_hash:String)   {        
+async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, config_hash:String, mut config:ConfigData)   {        
     let pause_duration = 2000;
     println!("partner check started");
     while *state.lock()==State::MasterWaiting {
@@ -243,8 +252,16 @@ async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, co
                                                                     for i in 0..n {
                                                                         vv.push(buf[i]);               
                                                                     }
-                                                                    let data= String::from_utf8(vv).unwrap();
+                                                                    let mut data= String::from_utf8(vv).unwrap();
+                                                                    println!("Query config: {}", data);
+                                                                    let log_sources :LogSources = toml::from_str(&data).unwrap(); 
+                                                                    config.log_sources = log_sources.log_sources;
+                                                                    data = toml::to_string(&config).unwrap();
                                                                     std::fs::write("./config.toml", data).expect("Unable to write to config.toml");
+                                                                    use std::os::unix::process::CommandExt;
+                                                                    std::process::Command::new("/proc/self/exe").exec();
+                                                                    std::process::exit(0);
+                                                                    
                                                                 },
                                                                 Err(e) => println!("Error in receiving new config")
                                                             }
@@ -283,7 +300,7 @@ async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, co
     };   
 }
 
-async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>,config_hash:String) {
+async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>,config_hash:String,log_sources_text:String) {
     {        
         let mut buf = [0; 256];            
         let mut v = Vec::new();
@@ -325,9 +342,8 @@ async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<Sta
                         }                        
                     }                    
                 }
-                else if message=="New config" {
-                    let config= std::fs::read_to_string("config.toml").expect("Can not read file").parse::<String>().expect("Error in parsing");
-                    match socket.write_all(config.as_bytes()).await {
+                else if message=="New config" {                    
+                    match socket.write_all(log_sources_text.as_bytes()).await {
                         Ok(_) => println!("New config sent"),
                         Err(e) => println!("Error in sending config, Error: {}",e)
                     }
