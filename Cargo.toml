@@ -19,3 +19,4 @@ serde="*"
 toml="*"
 #Hash calculation
 sha2="*"
+serde_json="*"

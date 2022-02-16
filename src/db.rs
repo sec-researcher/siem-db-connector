@@ -3,11 +3,36 @@ use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use super::init::{LogSource};
 
+//Experimental
+use std::collections::HashMap; 
+//Arc mutex for thread communication
+use std::sync::Arc;
+use parking_lot::Mutex;
+use serde_json;
 
-pub async fn call_db(log_source_config:LogSource)  {
+pub async fn write_db_change_on_disk(db_track_change: Arc<Mutex<HashMap<String,String>>>)
+{
+    loop {        
+        let data = serde_json::to_string(&*db_track_change.lock()).unwrap();
+        std::fs::write("./db_track_change.json", data).expect("Unable to write to config.toml");
+        std::thread::sleep(std::time::Duration::from_secs(1));
+    }
+}
+
+pub async fn call_db(log_source_config:LogSource, db_track_change: Arc<Mutex<HashMap<String,String>>>)  {
     println!("Call DB");
     let two_seconds = std::time::Duration::from_millis(2000);
+    let mut counter;
+    if *db_track_change.lock().get(&log_source_config.name).unwrap()=="" {
+        counter = 0;
+    }
+    else {
+        counter = db_track_change.lock().get_mut(&log_source_config.name).unwrap().parse::<i32>().unwrap();
+    }
+    
     loop {
+        counter+=1;
+        *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter.to_string();
         let mut config = Config::new();
         config.host(&log_source_config.addr);
         config.port(log_source_config.port);
