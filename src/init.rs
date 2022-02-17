@@ -1,5 +1,5 @@
 //Arc mutex for thread communication
-use std::sync::Arc;
+use std::{sync::Arc, collections::HashMap};
 use parking_lot::Mutex;
 
 #[derive(PartialEq,Clone,Copy,Debug)]
@@ -8,6 +8,7 @@ pub enum State {
     Master,
     Slave
 }
+
 
 use serde_derive::{Deserialize, Serialize };
 #[derive(Deserialize,Serialize)]
@@ -36,7 +37,7 @@ pub struct LogSource {
     pub query: String
 }
 
-pub fn init(app_socket: String,state:Arc<Mutex<State>>)
+pub fn init(app_socket: String,state:Arc<Mutex<State>>) 
 {
     use std::os::unix::net::UnixStream;
     use std::io::prelude::*; //Allow us to read and write from Unix sockets.
@@ -54,6 +55,23 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
         Err(e) => {
             println!("Go to listening mode, Error: {}",e);
             tokio::spawn(unix_socket_listener(app_socket, state));
+        }
+    }
+
+
+}
+
+pub fn update_db_track_change_from_disk(db_track_change:Arc<Mutex<HashMap<String,String>>>) {
+    match std::fs::read_to_string("./db_track_change.json") {
+        Ok(mut data) => {
+            if data=="" {
+                data="{}".to_owned();
+            }
+            *db_track_change.lock() = serde_json::from_str(&data).unwrap();
+        }
+        Err(e) => {
+            println!("Error in reading file content");
+            std::process::exit(0)
         }
     }
 }

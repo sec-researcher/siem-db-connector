@@ -1,5 +1,5 @@
 listening_addr = "10.94.204.1:8080"
-peer_addr= "192.168.1.1:80"    
+peer_addr= "10.94.204.23:8080"    
 app_socket="/tmp/db"
 pause_duration = 2000
 default_role = "master"

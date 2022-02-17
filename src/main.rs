@@ -30,24 +30,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
     else {
         state = Arc::new(Mutex::new(State::Slave));
     }
-    init::init(config.app_socket,Arc::clone(&state));
+
+    use std::collections::HashMap;
+    let db_track_change=Arc::new(Mutex::new(HashMap::new()));
+    //*db_track_change.lock() = serde_json::from_str(&init::init(config.app_socket,Arc::clone(&state))).unwrap();
+    init::update_db_track_change_from_disk(Arc::clone(&db_track_change));
     println!("init ended");
     
     let listener = TcpListener::bind(&config.listening_addr).await?;
     println!("Listening on network started!");
-    tokio::spawn(com::check_partner_status(Arc::clone(&state), config.peer_addr,config_hash.to_owned(), toml::from_str(&config_text).unwrap()));
+    tokio::spawn(com::check_partner_status(Arc::clone(&state), config.peer_addr.clone(),config_hash.to_owned(), toml::from_str(&config_text).unwrap()));
     
-    use std::collections::HashMap;
-    let db_track_change=Arc::new(Mutex::new(HashMap::new()));
-    *db_track_change.lock() = serde_json::from_str(&std::fs::read_to_string("./db_track_change.json").expect("Error reading db track change.json")).unwrap();
-
+    
     for log_source in log_sources.log_sources {
         if db_track_change.lock().contains_key(&log_source.name)==false {
             db_track_change.lock().insert(log_source.name.to_owned(), "".to_owned());
         }        
-        tokio::spawn(db::call_db(log_source, Arc::clone(&db_track_change)));
+        tokio::spawn(db::call_db(Arc::clone(&state),log_source, Arc::clone(&db_track_change)));
     }
-    tokio::spawn(db::write_db_change_on_disk(Arc::clone(&db_track_change)));
+    tokio::spawn(db::sync_db_change(Arc::clone(&db_track_change),config.peer_addr.clone()));
     loop {
         let (socket, _) = listener.accept().await?;        
         tokio::spawn(com::process_incominng(socket, Arc::clone(&state),config_hash.to_owned(), log_sources_text.clone()));

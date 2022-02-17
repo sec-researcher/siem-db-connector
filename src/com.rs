@@ -7,6 +7,57 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use super::init::{State, LogSources, ConfigData };
 
 
+pub async fn send_data(partner_address:&str, change_track:&str) -> Result<bool, std::io::Error>   {    
+    match TcpStream::connect(partner_address).await {
+        Ok(mut socket) => {
+                match socket.write_all(&format!("***CHT***{}***END***", change_track).as_bytes()).await {                        
+                    Ok(_) => {
+                        Ok(true)
+                    },
+                    Err(e) => {
+                        Err(e)
+                    }                        
+                }               
+        },
+        Err(e) => {
+            Err(e)
+        }
+    }    
+}
+
+#[derive(Debug)]
+pub enum ComError {
+    IOError(std::io::Error),
+    CustomError(&'static str)
+}
+pub async fn receive_data(socket: &mut tokio::net::TcpStream, start_sign:&str, end_sign: &str, mut msg: String) -> Result<String, ComError>  {
+    let mut buf = [0; 256];
+    let mut check_start = true;
+    let end_sign_len = end_sign.len();
+
+    while msg.len()<end_sign_len || &msg[msg.len()-end_sign_len..]!=end_sign {
+        match time::timeout(Duration::from_secs(2), socket.read(&mut buf)).await.unwrap_or(Ok(0)) {   
+            Ok(n) => {                                                                        
+                let data= String::from_utf8(buf[..n].to_vec()).unwrap();
+                msg = format!("{}{}", msg,data);
+                if start_sign!="" && check_start && msg.len()>=start_sign.len(){
+                    if &msg[..start_sign.len()-1]!=start_sign {
+                        return Err(ComError::CustomError("Start sign is not matched"))
+                    }
+                    else {
+                        check_start=false;
+                    }
+                }
+            },
+            Err(e) => {
+                return Err(ComError::IOError(e));
+            }
+        }
+    }
+    Ok(msg.replace("***CHT***", "").replace("***END***", ""))
+}
+
+
 pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, config_hash:String, mut config:ConfigData)   {        
     let pause_duration = 2000;
     println!("partner check started");
@@ -32,7 +83,7 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                                 //agent to master mode, but it's not appropriate way and made false positive logs.         
                                 // socket closed                    
                                 Ok(n) if n==0 => { //0 means socket closed or timeout happend in above line
-                                    println!("This agent got to master mode because Answer with 0 length received");
+                                    println!("This agent got to master mode because Answer with 0 length received or connection timed out");
                                     *state.lock() = State::Master;
                                 },
                                 Ok(n) => {
@@ -139,6 +190,15 @@ pub async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex
                         match socket.write_all(format!("{}***END***",log_sources_text).as_bytes()).await {
                             Ok(_) => println!("New config sent"),
                             Err(e) => println!("Error in sending config, Error: {}",e)
+                        }
+                    }
+                    else if &message[..9]=="***CHT***" {
+                        match receive_data(&mut socket, "", "***END***",message).await {
+                            Ok(mut data)=> {                                
+                                println!("******Data: {}", data);
+                                std::fs::write("./db_track_change.json", data).expect("Unable to write to db_track_change.json");
+                            },
+                            Err(e) => println!("Error in receiving track change data, Error: {:?}", e)
                         }
                     }
                 },
