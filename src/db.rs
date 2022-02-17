@@ -1,7 +1,7 @@
 use tiberius::{Client, Config, AuthMethod};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
-use crate::init::{ConfigData, State};
+use crate::init::{State};
 
 use super::init::{LogSource};
 
@@ -18,12 +18,12 @@ pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,
 {
     let mut data = "".to_owned();
     loop {
-        println!("Config sync started!");
         let new_data = serde_json::to_string(&*db_track_change.lock()).unwrap();
         if data!=new_data {
+            println!("Config sync started!");
             data = new_data;
             std::fs::write("./db_track_change.json", &data).expect("Unable to write to config.toml");
-            super::com::send_data(&peer_addr, &data).await;
+            super::com::send_data(&peer_addr, &data,"***CHT***","***END***").await;
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
@@ -36,18 +36,18 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
     if *db_track_change.lock().get(&log_source_config.name).unwrap()=="" {
         counter = 0;
     }
-    else {
-        counter = db_track_change.lock().get_mut(&log_source_config.name).unwrap().parse::<i32>().unwrap();
-    }
+   
     
-    let mut current_state = *state.lock();
-    let mut last_state = current_state;
+    //let mut current_state = *state.lock();
+    //let mut last_state = current_state;
     loop {
-        current_state = *state.lock();
-        if last_state!=current_state && current_state==State::Master {
-            super::init::update_db_track_change_from_disk(Arc::clone(&db_track_change));            
-        }
-        last_state = current_state;
+        counter = db_track_change.lock().get_mut(&log_source_config.name).unwrap().parse::<i32>().unwrap();
+        // current_state = *state.lock();
+        // if last_state!=current_state && current_state==State::Master {
+        //     super::init::update_db_track_change_from_disk(Arc::clone(&db_track_change));   
+        //     println!("-------update track chnage")         
+        // }
+        // last_state = current_state;
 
         if *state.lock()!=State::Slave {
             println!("Counter: {}", counter);

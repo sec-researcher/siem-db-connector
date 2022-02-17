@@ -61,19 +61,26 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
 
 }
 
-pub fn update_db_track_change_from_disk(db_track_change:Arc<Mutex<HashMap<String,String>>>) {
-    match std::fs::read_to_string("./db_track_change.json") {
-        Ok(mut data) => {
-            if data=="" {
-                data="{}".to_owned();
-            }
-            *db_track_change.lock() = serde_json::from_str(&data).unwrap();
-        }
+pub async fn update_db_track_change(db_track_change:Arc<Mutex<HashMap<String,String>>>, partner_address:&str) {
+    match super::com::send_data_get_response(partner_address, "init_db_track_change", "", "").await {
+        Ok(data) => *db_track_change.lock() = serde_json::from_str(&data).unwrap(),
         Err(e) => {
-            println!("Error in reading file content");
-            std::process::exit(0)
+            match std::fs::read_to_string("./db_track_change.json") {
+                Ok(mut data) => {
+                    if data=="" {
+                        data="{}".to_owned();
+                    }
+                    *db_track_change.lock() = serde_json::from_str(&data).unwrap();
+                }
+                Err(e) => {
+                    println!("Error in reading file content");
+                    std::process::exit(0)
+                }
+            }
         }
     }
+
+    
 }
 
 async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {

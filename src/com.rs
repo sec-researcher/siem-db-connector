@@ -1,16 +1,17 @@
 //Arc mutex for thread communication
-use std::sync::Arc;
+use std::{sync::Arc, fmt::Error};
 use parking_lot::Mutex;
 use tokio::{ time::{self, Duration}};
 use tokio::net::TcpStream;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use super::init::{State, LogSources, ConfigData };
+use std::collections::HashMap;
 
 
-pub async fn send_data(partner_address:&str, change_track:&str) -> Result<bool, std::io::Error>   {    
+pub async fn send_data(partner_address:&str, change_track:&str,start_sign:&str,end_sign:&str) -> Result<bool, std::io::Error>   {    
     match TcpStream::connect(partner_address).await {
         Ok(mut socket) => {
-                match socket.write_all(&format!("***CHT***{}***END***", change_track).as_bytes()).await {                        
+                match socket.write_all(&format!("{}{}{}", start_sign,change_track, end_sign).as_bytes()).await {                        
                     Ok(_) => {
                         Ok(true)
                     },
@@ -21,6 +22,29 @@ pub async fn send_data(partner_address:&str, change_track:&str) -> Result<bool, 
         },
         Err(e) => {
             Err(e)
+        }
+    }    
+}
+
+pub async fn send_data_get_response(partner_address:&str, data:&str,start_sign:&str,end_sign:&str) -> Result<String, ComError>   {    
+    match TcpStream::connect(partner_address).await {
+        Ok(mut socket) => {
+                match socket.write_all(&format!("{}{}{}", start_sign,data, end_sign).as_bytes()).await {                        
+                    Ok(_) => {
+                        match receive_data(&mut socket, "", "***END***","".to_string()).await {
+                            Ok(data)=> {                                
+                                Ok(data)
+                            },
+                            Err(e) => Err(e)
+                        }
+                    },
+                    Err(e) => {
+                        Err(ComError::IOError(e))
+                    }                        
+                }               
+        },
+        Err(e) => {
+            Err(ComError::IOError(e))
         }
     }    
 }
@@ -155,7 +179,8 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
     };   
 }
 
-pub async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>,config_hash:String,log_sources_text:String) {
+pub async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>,
+    config_hash:String,log_sources_text:String,db_track_change: Arc<Mutex<HashMap<String,String>>>) {
     {        
         let mut buf = [0; 256]; 
         // In a loop, read data from the socket and write the data back.
@@ -192,10 +217,18 @@ pub async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex
                             Err(e) => println!("Error in sending config, Error: {}",e)
                         }
                     }
+                    else if message=="init_db_track_change" {
+                        let data  = serde_json::to_string(&*db_track_change.lock()).unwrap();
+                        match socket.write_all(&format!("{}***END***",data).as_bytes()).await {
+                            Ok(_) => println!("db track change sent for init"),
+                            Err(e) => println!("Error on sending init db track change, Error: {}", e)
+                        }
+                    }
                     else if &message[..9]=="***CHT***" {
                         match receive_data(&mut socket, "", "***END***",message).await {
                             Ok(mut data)=> {                                
                                 println!("******Data: {}", data);
+                                *db_track_change.lock() = serde_json::from_str(&data).unwrap();
                                 std::fs::write("./db_track_change.json", data).expect("Unable to write to db_track_change.json");
                             },
                             Err(e) => println!("Error in receiving track change data, Error: {:?}", e)

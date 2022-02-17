@@ -34,7 +34,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     use std::collections::HashMap;
     let db_track_change=Arc::new(Mutex::new(HashMap::new()));
     //*db_track_change.lock() = serde_json::from_str(&init::init(config.app_socket,Arc::clone(&state))).unwrap();
-    init::update_db_track_change_from_disk(Arc::clone(&db_track_change));
+    println!("Initializing.....");
+    init::update_db_track_change(Arc::clone(&db_track_change), &config.peer_addr).await;
     println!("init ended");
     
     let listener = TcpListener::bind(&config.listening_addr).await?;
@@ -51,7 +52,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(db::sync_db_change(Arc::clone(&db_track_change),config.peer_addr.clone()));
     loop {
         let (socket, _) = listener.accept().await?;        
-        tokio::spawn(com::process_incominng(socket, Arc::clone(&state),config_hash.to_owned(), log_sources_text.clone()));
+        tokio::spawn(com::process_incominng(socket, Arc::clone(&state),
+        config_hash.to_owned(), log_sources_text.clone(), Arc::clone(&db_track_change)));
     }
 }
 
