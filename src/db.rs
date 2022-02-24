@@ -2,9 +2,7 @@ use tiberius::{Client, Config, AuthMethod};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use crate::init::{State};
-
 use super::init::{LogSource};
-
 //Experimental
 use std::{collections::HashMap}; 
 //Arc mutex for thread communication
@@ -29,7 +27,8 @@ pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,
     }
 }
 
-pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_track_change: Arc<Mutex<HashMap<String,String>>>)  {
+pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_track_change: Arc<Mutex<HashMap<String,String>>>
+                        ,log_server:String)  {
     println!("Call DB");
     let two_seconds = std::time::Duration::from_millis(1000);
     let mut counter;
@@ -71,28 +70,39 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                     match Client::connect(config, tcp.compat_write()).await {
                         Ok(mut client) => {
                             println!("Authenticate successfully");
-                            while *state.lock()!=State::Slave {                                
-                                counter = db_track_change.lock().get(&log_source_config.name).unwrap().parse::<String>().unwrap();
-                                let query = log_source_config.query.replace("??", &counter.to_string());
-                                let stream = client.query(&query, &[]).await.unwrap();
-                                match stream.into_first_result().await {
-                                    Ok(rows) => {
-                                        for item in rows {
-                                            let x = item.get_data();
-                                            counter= item.get_filed_data_as_string(&*log_source_config.counter_field);
-                                            println!("Counter: {}", counter);
-                                            *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter;
-                                            println!("{}", x);
+                            match super::com::connect_on_udp(&log_server).await {
+                                Ok(sock) => {
+                                    while *state.lock()!=State::Slave {                            
+                                        counter = db_track_change.lock().get(&log_source_config.name).unwrap().parse::<String>().unwrap();
+                                        let query = log_source_config.query.replace("??", &counter.to_string());
+                                        let stream = client.query(&query, &[]).await.unwrap();
+                                        match stream.into_first_result().await {                                    
+                                            Ok(rows) => {
+                                                for item in rows {
+                                                    let x = format!("{}\n",item.get_data());
+                                                    match sock.send(x.as_bytes()).await {
+                                                        Ok(_) => {
+                                                            counter= item.get_filed_data_as_string(&*log_source_config.counter_field);
+                                                            println!("Counter: {}", counter);
+                                                            *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter;
+                                                            println!("{}", x);
+                                                        },
+                                                        Err(e) => println!("Error in sending log, Original error: {}",e)
+                                                    }                                
+                                                }
+                                            },
+                                            Err(e) => {
+                                                println!("Error on calling inot_first_result, Original: {}", e);
+                                                break;
+                                            }
                                         }
-                                    },
-                                    Err(e) => {
-                                        println!("Error on calling inot_first_result, Original: {}", e);
-                                        break;
+                                        std::thread::sleep(two_seconds);
+                                        connection_wait = false;
                                     }
-                                }
-                                std::thread::sleep(two_seconds);
-                                connection_wait = false;
+                                },
+                                Err(e) => println!("Error in connecting to log server, Original Error: {}", e)
                             }
+                            
                         },
                         Err(e) => println!("An error happened!, Original: {}",e)
                     }

@@ -3,6 +3,7 @@ peer_addr= "10.235.20.20:8080"
 app_socket="/tmp/db"
 pause_duration = 2000
 default_role = "master"
+log_server = "127.0.0.1:1010"
 
 [[log_sources]]
 name="test"

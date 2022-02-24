@@ -7,6 +7,14 @@ use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use super::init::{State, LogSources, ConfigData };
 use std::collections::HashMap;
 
+use tokio::net::UdpSocket;
+use std::io;
+pub async fn connect_on_udp(log_server: &str) -> io::Result<(UdpSocket)> {
+    let sock = UdpSocket::bind("0.0.0.0:0").await?;
+    sock.connect(log_server).await?;  
+    io::Result::Ok((sock))    
+}
+
 
 pub async fn send_data(partner_address:&str, change_track:&str,start_sign:&str,end_sign:&str) -> Result<bool, std::io::Error>   {    
     match TcpStream::connect(partner_address).await {

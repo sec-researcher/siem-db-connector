@@ -47,7 +47,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if db_track_change.lock().contains_key(&log_source.name)==false {
             db_track_change.lock().insert(log_source.name.to_owned(), "".to_owned());
         }        
-        tokio::spawn(db::call_db(Arc::clone(&state),log_source, Arc::clone(&db_track_change)));
+        tokio::spawn(db::call_db(Arc::clone(&state),log_source, 
+            Arc::clone(&db_track_change), config.log_server.clone()));
     }
     tokio::spawn(db::sync_db_change(Arc::clone(&db_track_change),config.peer_addr.clone()));
     loop {
