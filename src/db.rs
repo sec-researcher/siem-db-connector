@@ -33,15 +33,15 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
     println!("Call DB");
     let two_seconds = std::time::Duration::from_millis(1000);
     let mut counter;
+    let mut connection_wait = true;
     if *db_track_change.lock().get(&log_source_config.name).unwrap()=="" {
-        counter = 0;
+        counter = log_source_config.counter_default_value;
     }
    
     
     //let mut current_state = *state.lock();
     //let mut last_state = current_state;
     loop {
-        counter = db_track_change.lock().get_mut(&log_source_config.name).unwrap().parse::<i32>().unwrap();
         // current_state = *state.lock();
         // if last_state!=current_state && current_state==State::Master {
         //     super::init::update_db_track_change_from_disk(Arc::clone(&db_track_change));   
@@ -50,9 +50,7 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
         // last_state = current_state;
 
         if *state.lock()!=State::Slave {
-            println!("Counter: {}", counter);
-            counter+=1;
-            *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter.to_string();
+            connection_wait = true;
             let mut config = Config::new();
             config.host(&log_source_config.addr);
             config.port(log_source_config.port);
@@ -73,13 +71,18 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                     match Client::connect(config, tcp.compat_write()).await {
                         Ok(mut client) => {
                             println!("Authenticate successfully");
-                            loop {
-                                let stream = client.query(&log_source_config.query, &[&-4i32]).await.unwrap();
+                            while *state.lock()!=State::Slave {                                
+                                counter = db_track_change.lock().get(&log_source_config.name).unwrap().parse::<String>().unwrap();
+                                let query = log_source_config.query.replace("??", &counter.to_string());
+                                let stream = client.query(&query, &[]).await.unwrap();
                                 match stream.into_first_result().await {
                                     Ok(rows) => {
                                         for item in rows {
-                                            let s: String = item.get::<&str, &str>("name").unwrap().to_owned();
-                                            println!("log_source of {}: {}",log_source_config.name, s);
+                                            let x = item.get_data();
+                                            counter= item.get_filed_data_as_string(&*log_source_config.counter_field);
+                                            println!("Counter: {}", counter);
+                                            *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter;
+                                            println!("{}", x);
                                         }
                                     },
                                     Err(e) => {
@@ -88,6 +91,7 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                                     }
                                 }
                                 std::thread::sleep(two_seconds);
+                                connection_wait = false;
                             }
                         },
                         Err(e) => println!("An error happened!, Original: {}",e)
@@ -96,6 +100,8 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                 Err(e) => println!("Error on connecting to databse, Original: {}", e)
             }
         }
-        std::thread::sleep(two_seconds);
+        if connection_wait { //Prevent from two times waiting in one cycle
+            std::thread::sleep(two_seconds);
+        }
     }       
 }

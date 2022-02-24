@@ -18,7 +18,8 @@ pub struct ConfigData {
     pub app_socket: String,
     pub default_role: String,
     pub pause_duration: u16, //In mili second
-    pub log_sources: Vec<LogSource>
+    pub log_sources: Vec<LogSource>,
+    
 }
 
 
@@ -34,7 +35,9 @@ pub struct LogSource {
     pub port: u16,
     pub username: String,
     pub pass: String,
-    pub query: String
+    pub query: String,
+    pub counter_field: String,
+    pub counter_default_value: String
 }
 
 pub fn init(app_socket: String,state:Arc<Mutex<State>>) 
