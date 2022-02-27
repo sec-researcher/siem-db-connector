@@ -26,5 +26,23 @@ counter_field = "id"
 counter_default_value = "1"
 
 
-
-   
+[[comp]]
+result="comp1, comp2,comp3"
+[[comp.log_sources]]
+name="amir"
+addr = "127.0.0.1"
+port= 1433
+username= "sa"
+pass= "123"
+query= "select * FROM [test].[dbo].[family]"
+counter_field = "id"
+counter_default_value = "1"
+[[comp.log_sources]]
+name="test"
+addr = "127.0.0.1"
+port= 1433
+username= "sa"
+pass= "P@ssw0rd"
+query= "select * FROM [test].[dbo].[family]"
+counter_field = "id"
+counter_default_value = "1"

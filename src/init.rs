@@ -20,7 +20,13 @@ pub struct ConfigData {
     pub pause_duration: u16, //In mili second
     pub log_server: String,
     pub log_sources: Vec<LogSource>,
-    
+    pub comp: Vec<Comp>    
+}
+
+#[derive(Clone,Deserialize,Serialize)]
+pub struct Comp {
+    pub result: String,
+    pub log_sources: Vec<LogSource>
 }
 
 
@@ -65,7 +71,7 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
 
 }
 
-pub async fn update_db_track_change(db_track_change:Arc<Mutex<HashMap<String,String>>>, partner_address:&str) {
+pub async fn update_db_track_change(db_track_change:Arc<Mutex<HashMap<String,String>>>, partner_address:&str,all_log_sources:Vec<LogSource>) {
     match super::com::send_data_get_response(partner_address, "init_db_track_change", "", "").await {
         Ok(data) => *db_track_change.lock() = serde_json::from_str(&data).unwrap(),
         Err(e) => {
@@ -75,6 +81,16 @@ pub async fn update_db_track_change(db_track_change:Arc<Mutex<HashMap<String,Str
                         data="{}".to_owned();
                     }
                     *db_track_change.lock() = serde_json::from_str(&data).unwrap();
+                    for item in all_log_sources {
+                        match db_track_change.lock().get(&item.name) {
+                            Some(value) => {
+                                if value=="" {
+                                    *db_track_change.lock().get_mut(&item.name).unwrap() = item.counter_default_value;
+                                }
+                            },
+                            None => *db_track_change.lock().get_mut(&item.name).unwrap() = item.counter_default_value
+                        }
+                    }
                 }
                 Err(e) => {
                     println!("Error in reading file content");
@@ -82,9 +98,7 @@ pub async fn update_db_track_change(db_track_change:Arc<Mutex<HashMap<String,Str
                 }
             }
         }
-    }
-
-    
+    } 
 }
 
 async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {

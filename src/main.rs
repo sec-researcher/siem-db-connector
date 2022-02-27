@@ -1,11 +1,12 @@
 extern crate static_vcruntime;
 use std::{error::Error};
+use sha2::digest::generic_array::sequence::Lengthen;
 use tokio::net::TcpListener;
 //Arc mutex for thread communication
 use std::sync::Arc;
 use parking_lot::Mutex;
 //use std::env;
-use init::{State, LogSources, ConfigData};
+use init::{State, LogSources, ConfigData, LogSource};
 mod init;
 //---------------------------------------------------------
 mod com;
@@ -35,7 +36,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let db_track_change=Arc::new(Mutex::new(HashMap::new()));
     //*db_track_change.lock() = serde_json::from_str(&init::init(config.app_socket,Arc::clone(&state))).unwrap();
     println!("Initializing.....");
-    init::update_db_track_change(Arc::clone(&db_track_change), &config.peer_addr).await;
+    let mut all_log_sources:Vec<LogSource>;
+    all_log_sources.append(&mut config.log_sources);
+    for comp in config.comp {
+        all_log_sources.append(&mut comp.log_sources);
+    }
+    init::update_db_track_change(Arc::clone(&db_track_change), &config.peer_addr, all_log_sources).await;
     println!("init ended");
     
     let listener = TcpListener::bind(&config.listening_addr).await?;
