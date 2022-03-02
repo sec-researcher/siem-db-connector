@@ -3,7 +3,7 @@ peer_addr= "10.235.20.20:8080"
 app_socket="/tmp/db"
 pause_duration = 2000
 default_role = "master"
-log_server = "127.0.0.1:1010"
+log_server = "127.0.0.1:10100"
 
 [[log_sources]]
 name="test"
@@ -27,22 +27,22 @@ counter_default_value = "1"
 
 
 [[comp]]
-result="comp1, comp2,comp3"
+result="compq1, cat=compq2,"
 [[comp.log_sources]]
-name="amir"
-addr = "127.0.0.1"
+name="compq1"
+addr = "192.168.77.129"
 port= 1433
-username= "sa"
+username= "test"
 pass= "123"
-query= "select * FROM [test].[dbo].[family]"
-counter_field = "id"
-counter_default_value = "1"
+query= "SELECT title as log_field_name  FROM [test].[dbo].[cat] where id=1"
+
 [[comp.log_sources]]
-name="test"
-addr = "127.0.0.1"
+name="compq2"
+addr = "192.168.77.129"
 port= 1433
-username= "sa"
-pass= "P@ssw0rd"
-query= "select * FROM [test].[dbo].[family]"
+username= "test"
+pass= "123"
+query= "SELECT name,id FROM [test].[dbo].[identity] where id=1"
 counter_field = "id"
 counter_default_value = "1"
+hide_counter=false

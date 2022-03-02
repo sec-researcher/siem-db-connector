@@ -9,6 +9,7 @@ edition = "2018"
 tiberius = "*"
 tokio = { version = "*", features = ["full"] }
 tokio-util={ version = "*", features = ["full"] }
+futures = "0.3.21"
 bytes="*"
 crossterm = { version="*", features = ["event-stream"]  }
 parking_lot="*"

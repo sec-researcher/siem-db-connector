@@ -1,17 +1,20 @@
+use futures::lock::MutexGuard;
 use tiberius::{Client, Config, AuthMethod};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use crate::init::{State};
 use super::init::{LogSource,Comp};
+use std::cell::{Ref, RefCell};
 //use std::hash::Hash;
 //Experimental
 use std::{collections::HashMap}; 
 //Arc mutex for thread communication
 use std::sync::Arc;
-use parking_lot::Mutex;
+use parking_lot::{Mutex, RawMutex};
 use serde_json;
 use tokio::{ time::{self, Duration}};
 
+use std::rc::Rc;
 
 pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,peer_addr:String)
 {
@@ -34,9 +37,7 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
     let two_seconds = std::time::Duration::from_millis(1000);
     let mut counter;
     let mut connection_wait = true;
-    if *db_track_change.lock().get(&log_source_config.name).unwrap()=="" {
-        counter = log_source_config.counter_default_value;
-    }      
+          
     
     loop {
         if *state.lock()!=State::Slave {
@@ -60,18 +61,41 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                             match super::com::connect_on_udp(&log_server).await {
                                 Ok(sock) => {
                                     while *state.lock()!=State::Slave {                            
-                                        counter = db_track_change.lock().get(&log_source_config.name).unwrap().parse::<String>().unwrap();
-                                        let query = log_source_config.query.replace("??", &counter.to_string());
+                                        let query;
+                                        if let Some(counter_field) = log_source_config.counter_field.clone() {
+                                            let counter = db_track_change.lock().get(&log_source_config.name).unwrap().clone();
+                                            query = log_source_config.query.replace("??", &counter.to_string());
+                                        }
+                                        else {
+                                            query = log_source_config.query.clone();
+                                        }
                                         let stream = client.query(&query, &[]).await.unwrap();
                                         match stream.into_first_result().await {                                    
                                             Ok(rows) => {
                                                 for item in rows {
-                                                    let x = format!("{}\n",item.get_data());
+                                                    let x;
+                                                    if let Some(counter_field) = log_source_config.counter_field.clone() {
+                                                        if log_source_config.hide_counter.unwrap() {
+                                                            x = format!("{}\n",item.get_data(&counter_field));
+                                                        }
+                                                        else {
+                                                            x = format!("{}\n",item.get_data(""));
+                                                        }                                                        
+                                                    }
+                                                    else {
+                                                        x = format!("{}\n",item.get_data(""));
+                                                    }
+
                                                     match sock.send(x.as_bytes()).await {
                                                         Ok(_) => {
-                                                            counter= item.get_filed_data_as_string(&*log_source_config.counter_field);
-                                                            println!("Counter: {}", counter);
-                                                            *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter;
+                                                            if let Some(counter_field) = log_source_config.counter_field.clone() {
+                                                                counter= item.get_filed_data_as_string(&*counter_field);
+                                                                println!("Counter: {}", counter);
+                                                                *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter;
+                                                            }
+                                                            // counter= item.get_filed_data_as_string(&*log_source_config.counter_field);
+                                                            // println!("Counter: {}", counter);
+                                                            // *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter;
                                                             println!("{}", x);
                                                         },
                                                         Err(e) => println!("Error in sending log, Original error: {}",e)
@@ -119,65 +143,104 @@ pub async fn create_sql_con(username:&str,pass:&str,addr:&str,port:u16) -> Resul
     return Ok(Client::connect(config, tcp.compat_write()).await?);
 }
 
-pub async fn call_query(client:&mut Client<Compat<TcpStream>>, query:&str,counter:&str) -> Result<Vec<tiberius::Row>,tiberius::error::Error> {
-    let query = query.replace("??", &counter.to_string());
+pub async fn call_query(mut client: Client<Compat<TcpStream>>, query:&str,counter:String, i:usize) -> Result<(Vec<tiberius::Row>,usize,Client<Compat<TcpStream>>),tiberius::error::Error> {
+    let query = query.replace("??", &counter);
+    println!("{}", query);
+    //let mut client = client.lock();    
     let stream = client.query(&query, &[]).await?;
-    return  Ok(stream.into_first_result().await?);        
+    return  Ok((stream.into_first_result().await?, i, client));
 }
 
 pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<Mutex<HashMap<String,String>>>,log_server:String)  {
     let two_seconds = std::time::Duration::from_millis(1000);
-    let mut counter;
+    //let mut counter;
     let mut connection_wait = true;
-    
-        
     loop {
-        if *state.lock()!=State::Slave {
-            let track_change: HashMap<String,String> = HashMap::new();
-            let mut sql_conn_list: HashMap<String,Client<Compat<TcpStream>>> = HashMap::new();
-            for log_source in &comp.log_sources {
-                match create_sql_con(&log_source.username.clone(), &log_source.pass.clone(), &log_source.addr.clone(), log_source.port).await {
+        if *state.lock()!=State::Slave {            
+            let mut sql_conn_list = vec!();
+            let mut connections = vec!();
+            let mut futures = vec!();
+            for i in 0..comp.log_sources.len() {
+                let log_source = &comp.log_sources[i];                
+                let future = create_sql_con(&log_source.username, &log_source.pass, &log_source.addr, log_source.port);
+                futures.push(future);
+            }
+            connections = futures::future::join_all(futures).await;
+            let mut i = 0;
+            for connection in connections { //Usage is for error handling and making sure are connection made successfully
+                match connection {
                     Ok(client) => {
-                        sql_conn_list.insert(log_source.name.clone(), client);  
+                        sql_conn_list.push(client);
                         //******************************************************** */
                     },
                     Err(e) => println!("Error in connecting to sql server, Original: {}", e)
                 }
+                i+=1;
             }
             //************Start fetching data
-            let udp_result = super::com::connect_on_udp(&log_server).await;
-            if let Ok(sock)= udp_result && sql_conn_list.len()==comp.log_sources.len()  {
-                while *state.lock()!=State::Slave {
-                    let mut log = comp.result.clone();
-                    for log_source in comp.log_sources {
-                        let client = sql_conn_list.get(&log_source.name).unwrap();
-                        counter = db_track_change.lock().get(&log_source.name).unwrap().parse::<String>().unwrap();
-                        match call_query(&mut client, &log_source.query , &counter).await {
-                            Ok(rows) => {
-                                log.replace(&log_source.name, &rows[0].get_data() );
-                                track_change.insert(log_source.name, rows[0].get_filed_data_as_string(&*log_source.counter_field));
-                            },
-                            Err(e) => println!("Error in querying data, Original: {}", e)
+            match super::com::connect_on_udp(&log_server).await {
+                Ok(sock)=>  {
+                    if sql_conn_list.len()==comp.log_sources.len() { //Make sure that connection to all server was success                                                
+                        while *state.lock()!=State::Slave {
+                            let mut track_change: HashMap<String,String> = HashMap::new();
+                            let mut log = comp.result.clone();
+                            let mut query_handles = vec!();
+                            let mut futures = vec!();
+
+                            sql_conn_list.reverse();
+                            let mut i =0;
+                            while !sql_conn_list.is_empty() {
+                                let log_source = &comp.log_sources[i];
+                                let client = sql_conn_list.pop().unwrap();
+                                let counter = db_track_change.lock().get(&log_source.name).unwrap_or(&"".to_owned()).to_string();
+                                let future = call_query(  client, &log_source.query , counter, i);
+                                //let future = call_query( &sql_conn_list, &log_source.query , counter);
+                                futures.push(future);
+                                i+=1;
+                            }                            
+                            query_handles = futures::future::join_all(futures).await;
+                            i = 0;
+                            for query_handle in query_handles {
+                                let log_source = &comp.log_sources[i];
+                                match query_handle {
+                                    Ok(rows) => {
+                                        sql_conn_list.push(rows.2);
+                                        //println!("num: {}",rows.1); //Used for makeing sure the sequence is correct
+                                        let rows = rows.0;
+                                        if let Some(counter_field) = log_source.counter_field.clone() {
+                                            track_change.insert(log_source.name.clone(), rows[0].get_filed_data_as_string(&*counter_field));
+                                            if log_source.hide_counter.unwrap() {
+                                                log = log.replace(&log_source.name, &rows[0].get_data(&counter_field) );
+                                            }
+                                            else {
+                                                log = log.replace(&log_source.name, &rows[0].get_data("") );
+                                            }                                            
+                                        }
+                                        else {
+                                            log = log.replace(&log_source.name, &rows[0].get_data("") );
+                                        }
+                                    },
+                                    Err(e) => println!("Error in querying data, Original: {}", e) //Error in this section may lead to log with no integrity
+                                }
+                                i+=1;
+                            }
+                            ///////////////////////////////////////////////
+                            log = format!("{}\n",log);
+                            match sock.send(log.as_bytes()).await {
+                                Ok(_) => {
+                                    for item in track_change {
+                                        *db_track_change.lock().get_mut(&item.0).unwrap() = item.1;
+                                    }                                    
+                                },
+                                Err(e) => println!("Error in sending log, Original error: {}",e)
+                            }
+                            std::thread::sleep(two_seconds);
+                            connection_wait = false;
                         }
                     }
-                    ///////////////////////////////////////////////
-                    // match sock.send(log.as_bytes()).await {
-                    //     Ok(_) => {
-                    //         counter= item.get_filed_data_as_string(&*log_source.counter_field);
-                    //         println!("Counter: {}", counter);
-                    //         *db_track_change.lock().get_mut(&log_source.name).unwrap()=counter;
-                    //         println!("{}", x);
-                    //     },
-                    //     Err(e) => println!("Error in sending log, Original error: {}",e)
-                    // }
-                    std::thread::sleep(two_seconds);
-                    connection_wait = false;
-                }
-            }
-            else if let Err(e) = udp_result {
-                println!("Error in connecting to log server, Original Error: {}", e)
-            }
-            
+                },
+                Err(e) => println!("Error in connecting to log server, Original Error: {}", e)
+            }           
         }
         if connection_wait { //Prevent from two times waiting in one cycle
             std::thread::sleep(two_seconds);

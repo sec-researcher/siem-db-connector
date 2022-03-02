@@ -23,6 +23,33 @@ pub struct ConfigData {
     pub comp: Vec<Comp>    
 }
 
+impl ConfigData {
+    pub fn get_all_logsource_name(&self) -> Vec<(String, String)> {
+        let mut v:Vec<(String,String)> = vec!();
+
+        for i in 0..self.log_sources.len() {
+            let item = &self.log_sources[i];
+            if let Some(counter_default_value) = item.counter_default_value.clone() {
+                v.push((item.name.clone(), counter_default_value.clone()));
+            }            
+        }
+        for comp in &self.comp {
+            for item in &comp.log_sources {
+                if let Some(counter_default_value) = item.counter_default_value.clone() {
+                    v.push((item.name.clone(), counter_default_value.clone()));
+                }
+            }
+        }
+        v
+    }
+    
+    pub fn get(&self) -> Vec<String> {
+        let mut v:Vec<String> = vec!();
+        v.push(self.listening_addr.clone());
+        v
+    }
+}
+
 #[derive(Clone,Deserialize,Serialize)]
 pub struct Comp {
     pub result: String,
@@ -43,8 +70,9 @@ pub struct LogSource {
     pub username: String,
     pub pass: String,
     pub query: String,
-    pub counter_field: String,
-    pub counter_default_value: String
+    pub counter_field: Option<String>,
+    pub counter_default_value: Option<String>,
+    pub hide_counter: Option<bool>
 }
 
 pub fn init(app_socket: String,state:Arc<Mutex<State>>) 
@@ -71,24 +99,30 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
 
 }
 
-pub async fn update_db_track_change(db_track_change:Arc<Mutex<HashMap<String,String>>>, partner_address:&str,all_log_sources:Vec<LogSource>) {
+pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<(String,String)>) -> Arc<Mutex<HashMap<String,String>>> {    
+    let mut db_track_change: HashMap<String,String> = HashMap::new();
     match super::com::send_data_get_response(partner_address, "init_db_track_change", "", "").await {
-        Ok(data) => *db_track_change.lock() = serde_json::from_str(&data).unwrap(),
-        Err(e) => {
+        Ok(data) => db_track_change = serde_json::from_str(&data).unwrap(),
+        Err(e) => { 
             match std::fs::read_to_string("./db_track_change.json") {
                 Ok(mut data) => {
                     if data=="" {
                         data="{}".to_owned();
                     }
-                    *db_track_change.lock() = serde_json::from_str(&data).unwrap();
-                    for item in all_log_sources {
-                        match db_track_change.lock().get(&item.name) {
-                            Some(value) => {
-                                if value=="" {
-                                    *db_track_change.lock().get_mut(&item.name).unwrap() = item.counter_default_value;
+                    
+                    db_track_change = serde_json::from_str(&data).unwrap();                    
+                    for item in all_log_sources_name {
+                        println!("inside for");
+                        match db_track_change.get(&item.0) {
+                            Some(value) => { 
+                                if value=="" { 
+                                    *db_track_change.get_mut(&item.0).unwrap() = item.1;
                                 }
                             },
-                            None => *db_track_change.lock().get_mut(&item.name).unwrap() = item.counter_default_value
+                            None => { 
+                                db_track_change.insert(item.0.to_string(),item.1.to_string() );                                
+                                println!("inside match error end");
+                            }
                         }
                     }
                 }
@@ -98,7 +132,8 @@ pub async fn update_db_track_change(db_track_change:Arc<Mutex<HashMap<String,Str
                 }
             }
         }
-    } 
+    }    
+    Arc::new(Mutex::new(db_track_change))
 }
 
 async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
