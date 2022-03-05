@@ -1,12 +1,11 @@
 extern crate static_vcruntime;
-use std::{error::Error, hash::Hash};
-use sha2::digest::generic_array::sequence::Lengthen;
+use std::error::Error;
 use tokio::net::TcpListener;
 //Arc mutex for thread communication
 use std::sync::Arc;
 use parking_lot::Mutex;
 //use std::env;
-use init::{State, LogSources, ConfigData, LogSource};
+use init::{State, LogSources, ConfigData};
 mod init;
 //---------------------------------------------------------
 mod com;
@@ -14,7 +13,8 @@ mod db;
 
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 100)]
-async fn main() -> Result<(), Box<dyn Error>> {     
+async fn main() -> Result<(), Box<dyn Error>> {    
+    
     use sha2::{Sha256, Digest};
     let mut hasher = Sha256::new();
     
@@ -32,7 +32,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
     else {
         state = Arc::new(Mutex::new(State::Slave));
     }
-    //*db_track_change.lock() = serde_json::from_str(&init::init(config.app_socket,Arc::clone(&state))).unwrap();
+    init::init(config.app_socket,Arc::clone(&state));
+    use log::{error, info, warn,trace,  debug}; 
+    error!("=========================");
+    warn!("Goes to stderr and file");
+    info!("Goes to stderr and file");
+    debug!("Goes to file only");
+    trace!("Goes to file only");
     println!("Initializing.....");
     let db_track_change = init::load_db_track_change( &config.peer_addr, all_log_sources_name).await;
     println!("init ended");

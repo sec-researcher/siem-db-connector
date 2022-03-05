@@ -21,3 +21,7 @@ toml="*"
 #Hash calculation
 sha2="*"
 serde_json="*"
+
+#Logging
+log="*"
+log4rs="*"

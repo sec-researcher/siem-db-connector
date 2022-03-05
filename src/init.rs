@@ -80,6 +80,10 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
     use std::os::unix::net::UnixStream;
     use std::io::prelude::*; //Allow us to read and write from Unix sockets.
     //Check if another instance is running
+    match enable_logging() {
+        Ok(_) => (),
+        Err(e) => println!("Error: {}", e)
+    };
     
     match UnixStream::connect(&app_socket) {
         Ok(mut stream) => {
@@ -97,6 +101,62 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
     }
 
 
+}
+
+
+use log::{error, info, warn,trace, LevelFilter, debug, SetLoggerError};
+use log4rs::{
+    config::Config,
+    append::console::{ConsoleAppender, Target},
+    append::file::FileAppender,
+    config::{Appender, Root},
+    encode::json::JsonEncoder,
+    filter::threshold::ThresholdFilter,
+};
+fn enable_logging() -> Result<(), SetLoggerError> {
+    let level = log::LevelFilter::Warn;
+    let file_path = "./log";
+    // Build a stderr logger.
+    let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
+    // Logging to log file.
+    let logfile = FileAppender::builder()
+        // Pattern: https://docs.rs/log4rs/*/log4rs/encode/pattern/index.html
+        .encoder(Box::new(JsonEncoder::new()))
+        .build(file_path)
+        .unwrap();
+
+    // Log Trace level output to file where trace is the default level
+    // and the programmatically specified level to stderr.
+    let config = Config::builder()
+        .appender(Appender::builder()
+            .filter(Box::new(ThresholdFilter::new(level)))
+            .build("logfile", Box::new(logfile)))
+        .appender(
+            Appender::builder()
+                .filter(Box::new(ThresholdFilter::new(level)))
+                .build("stderr", Box::new(stderr)),
+        )
+        .build(
+            Root::builder()
+                .appender("logfile")
+                .appender("stderr")
+                .build(LevelFilter::Trace),
+        )
+        .unwrap();
+
+    // Use this to change log levels at runtime.
+    // This means you can change the default log level to trace
+    // if you are trying to debug an issue and need more logs on then turn it off
+    // once you are done.
+    let _handle = log4rs::init_config(config)?;
+
+    error!("Goes to stderr and file");
+    warn!("Goes to stderr and file");
+    info!("Goes to stderr and file");
+    debug!("Goes to file only");
+    trace!("Goes to file only");
+
+    Ok(())
 }
 
 pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<(String,String)>) -> Arc<Mutex<HashMap<String,String>>> {    
