@@ -1,6 +1,62 @@
+#[macro_export]
+macro_rules! fatal {
+    () => {
+        log::error!("config panic");
+        panic!()
+    };
+    ($msg:expr) => {
+        log::error!($msg);
+        panic!()
+    };
+    ($msg:expr) => {
+        log::error!($msg);
+        panic!()
+    };
+    ($fmt:expr, $($arg:tt)+) => {
+        let msg = format!($fmt, $($arg)+);
+        log::error!("{}", &msg);
+        panic!()
+    };
+
+}
+
+//https://github.com/abreis/tracing-unwrap/
+use std::fmt;
+pub trait ResultExt<T, E> {
+    fn log(self, msg: &str) -> T
+    where
+        E: fmt::Debug;
+}
+impl<T, E> ResultExt<T, E> for Result<T, E> {
+    fn log(self, msg: &str) -> T
+    where
+        E: fmt::Debug,
+    {
+        match self {
+            Ok(t) => t,
+            Err(e) => {                
+                log::error!( "{}, OE:{:?}",msg,e );
+                std::process::exit(0)
+            }
+        }
+    }
+}
+
+
 //Arc mutex for thread communication
 use std::{sync::Arc, collections::HashMap};
 use parking_lot::Mutex;
+//Logging dependencies
+use log::{LevelFilter, SetLoggerError};
+use log4rs::{
+    config::Config,
+    append::console::{ConsoleAppender, Target},
+    append::file::FileAppender,
+    config::{Appender, Root},
+    encode::json::JsonEncoder,
+    filter::threshold::ThresholdFilter,
+};
+
 
 #[derive(PartialEq,Clone,Copy,Debug)]
 pub enum State {
@@ -8,8 +64,7 @@ pub enum State {
     Master,
     Slave
 }
-
-
+use serde::de::value::Error;
 use serde_derive::{Deserialize, Serialize };
 #[derive(Deserialize,Serialize)]
 pub struct ConfigData {
@@ -22,7 +77,6 @@ pub struct ConfigData {
     pub log_sources: Vec<LogSource>,
     pub comp: Vec<Comp>    
 }
-
 impl ConfigData {
     pub fn get_all_logsource_name(&self) -> Vec<(String, String)> {
         let mut v:Vec<(String,String)> = vec!();
@@ -43,11 +97,7 @@ impl ConfigData {
         v
     }
     
-    pub fn get(&self) -> Vec<String> {
-        let mut v:Vec<String> = vec!();
-        v.push(self.listening_addr.clone());
-        v
-    }
+    
 }
 
 #[derive(Clone,Deserialize,Serialize)]
@@ -78,43 +128,31 @@ pub struct LogSource {
 pub fn init(app_socket: String,state:Arc<Mutex<State>>) 
 {
     use std::os::unix::net::UnixStream;
-    use std::io::prelude::*; //Allow us to read and write from Unix sockets.
     //Check if another instance is running
-    match enable_logging() {
-        Ok(_) => (),
-        Err(e) => println!("Error: {}", e)
-    };
-    
     match UnixStream::connect(&app_socket) {
-        Ok(mut stream) => {
-            println!("Another instance is running..");
-            let mut response = String::new();
-            stream.read_to_string(&mut response).expect("Error happend in reading response from unix socket");
-            println!("{}", response);
-            std::process::exit(0);
+        Ok(mut _stream) => {
+            // let mut response = String::new();
+            //use std::io::prelude::*; //Allow us to read and write from Unix sockets.
+            // //if let Some(response);
+            // if let Ok(i) = stream.read_to_string(&mut response) {
+            //     log::info!("Can not read response of unix socket, returned value is: {}",i);
+            // }
+            log::error!("Another instance is running, so this process will ends.");
+            panic!("Another instance is running.");
         },
         //If error happenes means there is no other instance running
         Err(e) => {
-            println!("Go to listening mode, Error: {}",e);
+            log::info!("It seems there's no other instance running, Original error: {}", e);
             tokio::spawn(unix_socket_listener(app_socket, state));
         }
     }
-
-
 }
 
 
-use log::{error, info, warn,trace, LevelFilter, debug, SetLoggerError};
-use log4rs::{
-    config::Config,
-    append::console::{ConsoleAppender, Target},
-    append::file::FileAppender,
-    config::{Appender, Root},
-    encode::json::JsonEncoder,
-    filter::threshold::ThresholdFilter,
-};
-fn enable_logging() -> Result<(), SetLoggerError> {
-    let level = log::LevelFilter::Warn;
+
+
+pub fn enable_logging()  {
+    let level = log::LevelFilter::Info;
     let file_path = "./log";
     // Build a stderr logger.
     let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
@@ -123,7 +161,7 @@ fn enable_logging() -> Result<(), SetLoggerError> {
         // Pattern: https://docs.rs/log4rs/*/log4rs/encode/pattern/index.html
         .encoder(Box::new(JsonEncoder::new()))
         .build(file_path)
-        .unwrap();
+        .expect("Error in createing log4rs FileAppender");
 
     // Log Trace level output to file where trace is the default level
     // and the programmatically specified level to stderr.
@@ -142,57 +180,47 @@ fn enable_logging() -> Result<(), SetLoggerError> {
                 .appender("stderr")
                 .build(LevelFilter::Trace),
         )
-        .unwrap();
+        .expect("Error in building log4rs config");
 
     // Use this to change log levels at runtime.
     // This means you can change the default log level to trace
     // if you are trying to debug an issue and need more logs on then turn it off
     // once you are done.
-    let _handle = log4rs::init_config(config)?;
-
-    error!("Goes to stderr and file");
-    warn!("Goes to stderr and file");
-    info!("Goes to stderr and file");
-    debug!("Goes to file only");
-    trace!("Goes to file only");
-
-    Ok(())
+    let _handle = log4rs::init_config(config).expect("Error in initializing log4rs config");
 }
 
 pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<(String,String)>) -> Arc<Mutex<HashMap<String,String>>> {    
     let mut db_track_change: HashMap<String,String> = HashMap::new();
     match super::com::send_data_get_response(partner_address, "init_db_track_change", "", "").await {
-        Ok(data) => db_track_change = serde_json::from_str(&data).unwrap(),
+        Ok(data) => db_track_change = serde_json::from_str(&data).log("Can not deserialize db_track_change data received from partner"),        
         Err(e) => { 
             match std::fs::read_to_string("./db_track_change.json") {
                 Ok(mut data) => {
                     if data=="" {
                         data="{}".to_owned();
+                        log::info!("db_track_change.json is empty");
                     }
-                    
-                    db_track_change = serde_json::from_str(&data).unwrap();                    
-                    for item in all_log_sources_name {
-                        println!("inside for");
-                        match db_track_change.get(&item.0) {
+                    db_track_change = serde_json::from_str(&data).log("Can not deserialize db_track_change data readed from disk");                    
+                    for item in all_log_sources_name {                        
+                        match db_track_change.get_mut(&item.0) {
                             Some(value) => { 
-                                if value=="" { 
-                                    *db_track_change.get_mut(&item.0).unwrap() = item.1;
+                                if value=="" {
+                                    *value = item.1;
+                                    log::warn!("db_track_change key: {} was empty, so it sets by default value", item.0)                                    
                                 }
                             },
                             None => { 
-                                db_track_change.insert(item.0.to_string(),item.1.to_string() );                                
-                                println!("inside match error end");
+                                db_track_change.insert(item.0.to_string(),item.1.to_string() );                                                                
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    println!("Error in reading file content");
-                    std::process::exit(0)
+                    fatal!("Error in reading file content, OE:{}",e);                    
                 }
             }
         }
-    }    
+    }
     Arc::new(Mutex::new(db_track_change))
 }
 
@@ -200,9 +228,9 @@ async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
     use std::os::unix::net::UnixListener;
     use std::io::prelude::*; //Allow us to read and write from Unix sockets.    
     if std::path::Path::new(&app_socket).exists() {
-        std::fs::remove_file(&app_socket).expect("Can not delete file")
+        std::fs::remove_file(&app_socket).log("There is a file in path specified by config.app_socket, this process can not delete it");        
     }
-    let listener = UnixListener::bind(&app_socket).expect("Can not bind to unix socket");
+    let listener = UnixListener::bind(&app_socket).log("Can not bind to unix socket");
     //Set read only permision on file to protect if from accidental deletion.
     //let mut perms = std::fs::metadata(&config.app_socket).expect("Can not get socket permission.").permissions();
     //perms.set_readonly(true);
@@ -223,11 +251,11 @@ async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
                     else {
                         msg = format!("Agent is Slave.");
                     }
-                    stream.write_all( msg.as_bytes() ).expect("Error in writing to unix socket")
+                    stream.write_all( msg.as_bytes() ).log("Error in writing to unix socket")
                 });
             }
             Err(err) => {
-                /* connection failed */
+                log::warn!("Creating incoming connection failed, OE: {}", err);
                 break;
             }
         }
