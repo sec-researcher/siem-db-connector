@@ -22,8 +22,28 @@ macro_rules! fatal {
 
 //https://github.com/abreis/tracing-unwrap/
 use std::fmt;
+
+pub trait OptionExt<T> {
+    fn log_or(self, msg: &str, value:T) -> T;
+}
+impl<T> OptionExt<T> for Option<T> {
+    fn log_or(self, msg: &str, value:T) -> T {
+        match self {
+            Some(val) => val,
+            None => {
+                log::error!( "{}", msg);
+                value
+            }
+        }
+    }
+}
+
 pub trait ResultExt<T, E> {
     fn log(self, msg: &str) -> T
+    where
+        E: fmt::Debug;
+    
+    fn log_or(self, msg: &str, return_value:T) -> T
     where
         E: fmt::Debug;
 }
@@ -40,7 +60,21 @@ impl<T, E> ResultExt<T, E> for Result<T, E> {
             }
         }
     }
+
+    fn log_or(self, msg: &str, return_value: T) -> T
+    where
+        E: fmt::Debug,
+    {
+        match self {
+            Ok(t) => t,
+            Err(e) => {
+                log::error!( "{}, OE:{:?}",msg,e );
+                return_value
+            }
+        }
+    }
 }
+
 
 
 //Arc mutex for thread communication

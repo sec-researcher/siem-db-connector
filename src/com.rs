@@ -9,11 +9,12 @@ use std::collections::HashMap;
 
 use tokio::net::UdpSocket;
 use std::io;
-pub async fn connect_on_udp(log_server: &str) -> io::Result<(UdpSocket)> {
+pub async fn connect_on_udp(log_server: &str) -> io::Result<UdpSocket> {
     let sock = UdpSocket::bind("0.0.0.0:0").await?;
     sock.connect(log_server).await?;  
-    io::Result::Ok((sock))    
+    io::Result::Ok(sock)    
 }
+use crate::init::ResultExt;
 
 
 pub async fn send_data(partner_address:&str, change_track:&str,start_sign:&str,end_sign:&str) -> Result<bool, std::io::Error>   {    
@@ -91,39 +92,40 @@ pub async fn receive_data(socket: &mut tokio::net::TcpStream, start_sign:&str, e
 
 
 pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, config_hash:String, mut config:ConfigData)   {        
-    let pause_duration = 2000;
-    println!("partner check started");
+    let pause_duration = 2000;    
     while *state.lock()==State::MasterWaiting {
         std::thread::sleep(std::time::Duration::from_secs(1));
-        println!("Waiting for an slave to connect!!");
+        log::info!("Waiting for an slave to connect!!");
     }
     let mut buf = [0; 256];
     let two_seconds = std::time::Duration::from_millis(pause_duration);
     
     // In a loop, read data from the socket and write the data back.
-    loop  {
-        match TcpStream::connect(&partner_address).await {
+    'connect: loop  {
+        log::info!("trying to create a connection to partner for checking partner status.");
+        match TcpStream::connect(&partner_address).await {            
             Ok(mut socket) => {
-                loop {
-                    println!("Connection made in check partner");
+                'write: loop {                    
                     match socket.write_all(&format!("What's up?\n").as_bytes()).await {                        
                         Ok(_) => {
-                            //------------------------
-                            println!("data send in check partner");
+                            log::info!("What's up message sent to check partner status.");
                             match time::timeout(Duration::from_secs(2), socket.read(&mut buf)).await.unwrap_or(Ok(0)) {  
                                 //unwrap_or pass Ok(0) instead of writing error handling for timeout for simplicity we pass Ok(0) means putting 
                                 //agent to master mode, but it's not appropriate way and made false positive logs.         
                                 // socket closed                    
                                 Ok(n) if n==0 => { //0 means socket closed or timeout happend in above line
-                                    println!("This agent got to master mode because Answer with 0 length received or connection timed out");
+                                    log::warn!("This agent go to master mode because Answer with 0 length received or connection timed out");
                                     *state.lock() = State::Master;
                                 },
                                 Ok(n) => {
-                                    println!("Process_incoming, data len:{}",n);                                    
-                                    let message= String::from_utf8(buf[..n].to_vec()).unwrap();
-                                    if message=="I'm slave\n" {
+                                    let message= String::from_utf8(buf[..n].to_vec()).unwrap_or("".to_string());
+                                    if message=="" {
+                                        log::error!("Converting bytes to string fails in check_partner_status, so app will close current socket and open a new one");
+                                        break 'write;
+                                    }
+                                    else if message=="I'm slave\n" {
                                         *state.lock() = State::Master;
-                                        println!("This agent go to master mode because incorrect message received from master")
+                                        log::warn!("This agent go to master mode because incorrect message received from partner")
                                     }
                                     else { //If message!="I'm slave\n", It's I'm master+query config hash splitted by \n
                                         let message = message.split("\n").collect::<Vec<&str>>();
@@ -135,43 +137,48 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                                                         while msg.len()<9 || &msg[msg.len()-9..]!="***END***" {
                                                             match time::timeout(Duration::from_secs(2), socket.read(&mut buf)).await.unwrap_or(Ok(0)) {   
                                                                 Ok(n) => {                                                                        
-                                                                    let data= String::from_utf8(buf[..n].to_vec()).unwrap();
+                                                                    let data= String::from_utf8(buf[..n].to_vec()).unwrap_or("".to_string());
+                                                                    if data=="" {
+                                                                        log::error!("Error in converting bytes to string in received new config");
+                                                                        break 'write;
+                                                                    }
                                                                     msg = format!("{}{}", msg,data);
                                                                 },
-                                                                Err(e) => println!("Error in receiving new config")
+                                                                Err(e) => log::error!("Error in receiving new config, OE: {}", e)
                                                             }
                                                         }
-
                                                         if msg.len()>=9 {
-                                                            let log_sources :LogSources = toml::from_str(&msg[..msg.len()-9]).unwrap(); 
-                                                            config.log_sources = log_sources.log_sources;
-                                                            msg = toml::to_string(&config).unwrap();
-                                                            std::fs::write("./config.toml", msg).expect("Unable to write to config.toml");
-                                                            use std::os::unix::process::CommandExt;
-                                                            std::process::Command::new("/proc/self/exe").exec();
-                                                            std::process::exit(0);
+                                                            match toml::from_str::<LogSources>(&msg[..msg.len()-9]) {
+                                                                Ok(log_sources) => {
+                                                                    config.log_sources = log_sources.log_sources;
+                                                                    msg = toml::to_string(&config).log_or("Can not convert toml object to string, empty string will be return", "".to_string());
+                                                                    std::fs::write("./config.toml", msg).log_or("Unable to write to config.toml",());
+                                                                    use std::os::unix::process::CommandExt;
+                                                                    log::warn!("App will restart for setting new config, result: {}", std::process::Command::new("/proc/self/exe").exec());
+                                                                    std::process::exit(0);
+                                                                },
+                                                                Err(e) => log::error!("Received data for new config is not a valid toml format, OE: {}",e)
+                                                            }
                                                         }
-                                                        
-                                                        
                                                     },
-                                                    Err(e) => println!("Error in requesting new config")
+                                                    Err(e) => log::error!("Error in requesting new config, OE: {}", e)
                                                 }
                                             }
                                         }
-                                        println!("This agent go to slave mode, Because other side is in master mode");
+                                        log::warn!("This agent go to slave mode, Because other side is in master mode");
                                         *state.lock() = State::Slave;
                                         }
                                 },
                                 Err(e) => {                
                                     *state.lock() = State::Master;
-                                    println!("This agent got to master mode because failed to read from socket; err = {:?}", e);
+                                    log::warn!("This agent go to master mode because failed to read from socket, OE: {}", e);
                                     break;//Break the loop to make a new connection
                                 }
                             }
                             //------------------------
                         },
                         Err(e) => {
-                            println!("An error hapeened in writing to connection!, Error: {}", e);
+                            log::error!("An error hapeened in sending what's up request,OE: {}", e);
                             break; //Break the loop to make a new connection
                         }                        
                     }
@@ -179,7 +186,7 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                 }
             },
             Err(e) => {
-                println!("This agent go to master mode, Because of connection error: {}", e);
+                log::error!("Can not connect to partner so this agent go to master mode,OE: {}", e);
                 *state.lock() = State::Master;
             }
         }
@@ -190,61 +197,69 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
 pub async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>,
     config_hash:String,log_sources_text:String,db_track_change: Arc<Mutex<HashMap<String,String>>>) {
     {        
-        let mut buf = [0; 256]; 
+        let mut buf = [0; 1024]; 
         // In a loop, read data from the socket and write the data back.
         loop {            
-            let n = match socket.read(&mut buf).await {                    
+            match socket.read(&mut buf).await {                    
                 // socket closed                    
-                Ok(n) if n ==0 => return,
+                Ok(n) if n ==0 => {
+                    log::warn!("Size of received data is 0");
+                    return
+                },
                 Ok(n) => {
-                    println!("Process_incoming, data len:{}",n);
-                    let message= String::from_utf8(buf[..n].to_vec()).unwrap();            
-                    println!("{}",message);
+                    log::info!("Process_incoming, data len:{}",n);
+                    let message= String::from_utf8(buf[..n].to_vec()).log_or("Can not convert process_incoming data to string", "".to_string());                    
                     if message=="What's up?\n" {
-                        println!("whats up received!!!!");
-                        if *state.lock()!=State::Slave {                        
-                            println!("If passed!");
+                        log::info!("whats up message received!!!!");
+                        if *state.lock()!=State::Slave {
                             match socket.write_all(&format!("I'm master\n{}",config_hash).as_bytes()).await {
                                 Ok(_) => {
-                                    *state.lock() = State::Master; //??Can be optimized
-                                    println!("State set to master")
+                                    log::info!("'I'm master' message sent successfully");
+                                    if *state.lock()==State::MasterWaiting {
+                                        *state.lock() = State::Master;
+                                        log::warn!("Agent from MasterWaiting go to Master mode")
+                                    }                                    
                                 },
-                                Err(e) => println!("Error on writing data to client connection, Error: {}", e)
+                                Err(e) => log::error!("Error in sending 'I'm master' message to client, OE: {}", e)
                             }
                         }
                         else {
                             match socket.write_all(&format!("I'm slave\n").as_bytes()).await {
-                                Ok(_) => println!("Message sent to client"),
-                                Err(e) => println!("Error on writing data to client connection, Error: {}", e)
+                                Ok(_) => log::info!("'I'm slave' message sent to client successfully"),
+                                Err(e) => log::error!("Error in sending 'I'm slave' message to client, OE: {}", e)
                             }                        
                         }                    
                     }
                     else if message=="New config" {                    
                         match socket.write_all(format!("{}***END***",log_sources_text).as_bytes()).await {
-                            Ok(_) => println!("New config sent"),
-                            Err(e) => println!("Error in sending config, Error: {}",e)
+                            Ok(_) => log::info!("New config sent to client successfully"),
+                            Err(e) => log::error!("Error in sending new config to client, OE: {}",e)
                         }
                     }
                     else if message=="init_db_track_change" {
-                        let data  = serde_json::to_string(&*db_track_change.lock()).unwrap();
+                        let data  = serde_json::to_string(&*db_track_change.lock()).log_or("Can not convert db_track_change object to string", "".to_string());
                         match socket.write_all(&format!("{}***END***",data).as_bytes()).await {
-                            Ok(_) => println!("db track change sent for init"),
-                            Err(e) => println!("Error on sending init db track change, Error: {}", e)
+                            Ok(_) => log::info!("db_track_change for init sent successfully"),
+                            Err(e) => log::error!("Error on sending init db_track_change, OE:{}", e)
                         }
                     }
                     else if &message[..9]=="***CHT***" {
                         match receive_data(&mut socket, "", "***END***",message).await {
-                            Ok(mut data)=> {                                
-                                println!("******Data: {}", data);
-                                *db_track_change.lock() = serde_json::from_str(&data).unwrap();
-                                std::fs::write("./db_track_change.json", data).expect("Unable to write to db_track_change.json");
+                            Ok(data)=> {
+                                match serde_json::from_str(&data) {
+                                    Ok(json) => {
+                                        *db_track_change.lock() = json;
+                                        std::fs::write("./db_track_change.json", data).log_or("Unable to write to db_track_change.json", ());
+                                    },
+                                    Err(e) => log::error!("Can not convert db_track_change data received over net to json, OE: {}",e)
+                                }
                             },
-                            Err(e) => println!("Error in receiving track change data, Error: {:?}", e)
+                            Err(e) => log::error!("Error in receiving db_track_change data, OE: {:?}", e)
                         }
                     }
                 },
                 Err(e) => {
-                    eprintln!("failed to read from socket; err = {:?}", e);
+                    log::error!("Failed to read from socket, OE: {}", e);
                     return;
                 }
             };

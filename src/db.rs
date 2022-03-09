@@ -1,31 +1,29 @@
-use futures::lock::MutexGuard;
 use tiberius::{Client, Config, AuthMethod};
 use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use crate::init::{State};
 use super::init::{LogSource,Comp};
-use std::cell::{Ref, RefCell};
 //use std::hash::Hash;
 //Experimental
 use std::{collections::HashMap}; 
 //Arc mutex for thread communication
 use std::sync::Arc;
-use parking_lot::{Mutex, RawMutex};
+use parking_lot::{Mutex};
 use serde_json;
 use tokio::{ time::{self, Duration}};
+use crate::init::{ResultExt, OptionExt };
 
-use std::rc::Rc;
 
 pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,peer_addr:String)
 {
     let mut data = "".to_owned();
     loop {
-        let new_data = serde_json::to_string(&*db_track_change.lock()).unwrap();
-        if data!=new_data {
-            println!("Config sync started!");
+        let new_data = serde_json::to_string(&*db_track_change.lock()).log_or("Can not convert db_track_change object to string", "".to_string());
+        if data!="" && data!=new_data {
+            log::info!("db_track_change config sync started!");
             data = new_data;
-            std::fs::write("./db_track_change.json", &data).expect("Unable to write to config.toml");
-            super::com::send_data(&peer_addr, &data,"***CHT***","***END***").await;
+            std::fs::write("./db_track_change.json", &data).log_or("Unable to write to config.toml in sync_db_change", ());
+            super::com::send_data(&peer_addr, &data,"***CHT***","***END***").await.log_or("Error in sending new config to partner.", true);
         }
         std::thread::sleep(std::time::Duration::from_secs(1));
     }
@@ -33,7 +31,7 @@ pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,
 
 pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_track_change: Arc<Mutex<HashMap<String,String>>>
                         ,log_server:String)  {
-    println!("Call DB");
+    log::info!("Call DB started for {}", log_source_config.name);
     let two_seconds = std::time::Duration::from_millis(1000);
     let mut counter;
     let mut connection_wait = true;
@@ -53,17 +51,17 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                 Ok(tcp) => {
                     match tcp.set_nodelay(true) {
                         Ok(_) =>(),
-                        Err(e) => println!("Error in set_nodelay function, Original: {}",e)
+                        Err(e) => log::error!("Error in set_nodelay function, OE: {}",e)
                     }                    
                     match Client::connect(config, tcp.compat_write()).await {
                         Ok(mut client) => {
-                            println!("Authenticate successfully");
+                            log::warn!("Authenticate successfully for {}", log_source_config.name);
                             match super::com::connect_on_udp(&log_server).await {
                                 Ok(sock) => {
                                     while *state.lock()!=State::Slave {                            
                                         let query;
-                                        if let Some(counter_field) = log_source_config.counter_field.clone() {
-                                            let counter = db_track_change.lock().get(&log_source_config.name).unwrap().clone();
+                                        if let Some(counter_field) = log_source_config.counter_field.clone() { //Makeing sure of setting counter field.
+                                            let counter = db_track_change.lock().get(&log_source_config.name).log_or("Can not retrieve field from db_track_change.", &"".to_string()).clone();
                                             query = log_source_config.query.replace("??", &counter.to_string());
                                         }
                                         else {
