@@ -3,15 +3,12 @@ use tokio::net::TcpStream;
 use tokio_util::compat::TokioAsyncWriteCompatExt;
 use crate::init::{State};
 use super::init::{LogSource,Comp};
-//use std::hash::Hash;
-//Experimental
 use std::{collections::HashMap}; 
-//Arc mutex for thread communication
 use std::sync::Arc;
 use parking_lot::{Mutex};
 use serde_json;
 use tokio::{ time::{self, Duration}};
-use crate::init::{ResultExt, OptionExt };
+use crate::init::ResultExt;
 
 
 pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,peer_addr:String)
@@ -29,103 +26,7 @@ pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,
     }
 }
 
-pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_track_change: Arc<Mutex<HashMap<String,String>>>
-                        ,log_server:String)  {
-    log::info!("Call DB started for {}", log_source_config.name);
-    let two_seconds = std::time::Duration::from_millis(1000);
-    let mut counter;
-    let mut connection_wait = true;
-          
-    
-    loop {
-        if *state.lock()!=State::Slave {
-            connection_wait = true;
-            let mut config = Config::new();
-            config.host(&log_source_config.addr);
-            config.port(log_source_config.port);
-            config.authentication(AuthMethod::sql_server(&log_source_config.username, &log_source_config.pass));
-            config.trust_cert(); // on production, it is not a good idea to do this  
-            use std::io::{Error,ErrorKind};
-            match time::timeout(Duration::from_secs(1),
-            TcpStream::connect(config.get_addr())).await.unwrap_or(Err(Error::new(ErrorKind::TimedOut, "Timed out"))) {                        
-                Ok(tcp) => {
-                    match tcp.set_nodelay(true) {
-                        Ok(_) =>(),
-                        Err(e) => log::error!("Error in set_nodelay function, OE: {}",e)
-                    }                    
-                    match Client::connect(config, tcp.compat_write()).await {
-                        Ok(mut client) => {
-                            log::warn!("Authenticate successfully for {}", log_source_config.name);
-                            match super::com::connect_on_udp(&log_server).await {
-                                Ok(sock) => {
-                                    while *state.lock()!=State::Slave {                            
-                                        let query;
-                                        if let Some(counter_field) = log_source_config.counter_field.clone() { //Makeing sure of setting counter field.
-                                            let counter = db_track_change.lock().get(&log_source_config.name).log_or("Can not retrieve field from db_track_change.", &"".to_string()).clone();
-                                            query = log_source_config.query.replace("??", &counter.to_string());
-                                        }
-                                        else {
-                                            query = log_source_config.query.clone();
-                                        }
-                                        let stream = client.query(&query, &[]).await.unwrap();
-                                        match stream.into_first_result().await {                                    
-                                            Ok(rows) => {
-                                                for item in rows {
-                                                    let x;
-                                                    if let Some(counter_field) = log_source_config.counter_field.clone() {
-                                                        if log_source_config.hide_counter.unwrap() {
-                                                            x = format!("{}\n",item.get_data(&counter_field));
-                                                        }
-                                                        else {
-                                                            x = format!("{}\n",item.get_data(""));
-                                                        }                                                        
-                                                    }
-                                                    else {
-                                                        x = format!("{}\n",item.get_data(""));
-                                                    }
 
-                                                    match sock.send(x.as_bytes()).await {
-                                                        Ok(_) => {
-                                                            if let Some(counter_field) = log_source_config.counter_field.clone() {
-                                                                counter= item.get_filed_data_as_string(&*counter_field);
-                                                                println!("Counter: {}", counter);
-                                                                *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter;
-                                                            }
-                                                            // counter= item.get_filed_data_as_string(&*log_source_config.counter_field);
-                                                            // println!("Counter: {}", counter);
-                                                            // *db_track_change.lock().get_mut(&log_source_config.name).unwrap()=counter;
-                                                            println!("{}", x);
-                                                        },
-                                                        Err(e) => println!("Error in sending log, Original error: {}",e)
-                                                    }                                
-                                                }
-                                            },
-                                            Err(e) => {
-                                                println!("Error on calling inot_first_result, Original: {}", e);
-                                                break;
-                                            }
-                                        }
-                                        std::thread::sleep(two_seconds);
-                                        connection_wait = false;
-                                    }
-                                },
-                                Err(e) => println!("Error in connecting to log server, Original Error: {}", e)
-                            }
-                            
-                        },
-                        Err(e) => println!("An error happened!, Original: {}",e)
-                    }
-                },
-                Err(e) => println!("Error on connecting to databse, Original: {}", e)
-            }
-        }
-        if connection_wait { //Prevent from two times waiting in one cycle
-            std::thread::sleep(two_seconds);
-        }
-    }       
-}
-
-//-----------------------------------------*********************************************************************>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 use tokio_util::compat::Compat;
 pub async fn create_sql_con(username:&str,pass:&str,addr:&str,port:u16) -> Result<Client<Compat<TcpStream>>,tiberius::error::Error>  {
     println!("Call DB");
@@ -149,15 +50,89 @@ pub async fn call_query(mut client: Client<Compat<TcpStream>>, query:&str,counte
     return  Ok((stream.into_first_result().await?, i, client));
 }
 
-pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<Mutex<HashMap<String,String>>>,log_server:String)  {
+pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_track_change: Arc<Mutex<HashMap<String,String>>>
+                        ,mut log_server:String)  {
+    log_server = log_source_config.log_server.unwrap_or( log_server );    
+    log::warn!("Call DB started for {}", log_source_config.name);
+    let two_seconds = std::time::Duration::from_millis(1000);
+    let mut counter;
+    let mut connection_wait = true;
+    loop {
+        if *state.lock()!=State::Slave {
+            connection_wait = true;
+            match create_sql_con(&log_source_config.username, &log_source_config.pass, &log_source_config.addr, log_source_config.port).await {
+                Ok(mut client)=> {
+                    log::warn!("successfully connect and Auth to {}", log_source_config.name);
+                    match super::com::connect_on_udp(&log_server).await {
+                        Ok(sock) => {
+                            log::warn!("successfully connected to log server at {}", log_server);
+                            while *state.lock()!=State::Slave {
+                                counter = db_track_change.lock().get(&log_source_config.name).unwrap_or(&"".to_owned()).to_string();
+                                match call_query(  client, &log_source_config.query , counter, 0).await {
+                                    Ok((rows,_i,returned_client)) => {
+                                        client=returned_client;
+                                        for item in rows {
+                                            let log;
+                                            if let Some(counter_field) = log_source_config.counter_field.clone() {
+                                                if log_source_config.hide_counter!=Option::None {
+                                                    log = format!("{}\n",item.get_data(&counter_field));
+                                                }
+                                                else {
+                                                    log = format!("{}\n",item.get_data(""));
+                                                }                                                        
+                                            }
+                                            else {
+                                                log = format!("{}\n",item.get_data(""));
+                                            }
+                                            match sock.send(log.as_bytes()).await {
+                                                Ok(_) => {
+                                                    if let Some(counter_field) = log_source_config.counter_field.clone() {
+                                                        counter= item.get_filed_data_as_string(&*counter_field);                                                                                                                
+                                                        match db_track_change.lock().get_mut(&log_source_config.name) {
+                                                            Some(track_change) => *track_change = counter,
+                                                            None => log::error!("Can not find {} key in db_track_change.", log_source_config.name)
+                                                        }
+                                                    }
+                                                    log::debug!("{}", log)
+                                                },
+                                                Err(e) => log::error!("Error in sending log, OE: {}",e)
+                                            }                                
+                                        }
+                                    },
+                                    Err(e) => {
+                                        log::error!("Error on calling query&fetching result, OE: {}", e);
+                                        break;
+                                    }                                    
+                                }                                
+                                std::thread::sleep(two_seconds);
+                                connection_wait = false;
+                            }
+                        },
+                        Err(e) => log::error!("Error in connecting to log server: {}, OE: {}", log_server, e)
+                    }                    
+                },
+                Err(e) => log::error!("Error in connectimg to {}({}), OE: {}", log_source_config.name, log_source_config.addr, e )
+            }
+        }
+        if connection_wait { //Prevent from two times waiting in one cycle
+            std::thread::sleep(two_seconds);
+        }
+    }       
+}
+
+//-----------------------------------------*********************************************************************>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
+
+pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<Mutex<HashMap<String,String>>>,mut log_server:String)  {    
+    log_server = comp.log_server.unwrap_or( log_server );
     let two_seconds = std::time::Duration::from_millis(1000);
     //let mut counter;
     let mut connection_wait = true;
     loop {
-        if *state.lock()!=State::Slave {            
+        if *state.lock()!=State::Slave {
             let mut sql_conn_list = vec!();
             let mut connections = vec!();
             let mut futures = vec!();
+            log::warn!("Trying to connect to all sql server in comp {}", comp.name);
             for i in 0..comp.log_sources.len() {
                 let log_source = &comp.log_sources[i];                
                 let future = create_sql_con(&log_source.username, &log_source.pass, &log_source.addr, log_source.port);
@@ -165,19 +140,21 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
             }
             connections = futures::future::join_all(futures).await;
             let mut i = 0;
+            log::warn!("Checking result of connection to all sql server in comp {}", comp.name);
             for connection in connections { //Usage is for error handling and making sure are connection made successfully
                 match connection {
                     Ok(client) => {
                         sql_conn_list.push(client);
                         //******************************************************** */
                     },
-                    Err(e) => println!("Error in connecting to sql server, Original: {}", e)
+                    Err(e) => log::error!("Error in connecting to sql server, OE: {}", e)
                 }
                 i+=1;
             }
             //************Start fetching data
-            match super::com::connect_on_udp(&log_server).await {
+            match super::com::connect_on_udp(&log_server).await {                
                 Ok(sock)=>  {
+                    log::warn!("Connected to log server {}", log_server);
                     if sql_conn_list.len()==comp.log_sources.len() { //Make sure that connection to all server was success                                                
                         while *state.lock()!=State::Slave {
                             let mut track_change: HashMap<String,String> = HashMap::new();
@@ -187,9 +164,10 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
 
                             sql_conn_list.reverse();
                             let mut i =0;
+                            log::info!("Sending query to all mssql server on {}", comp.name);
                             while !sql_conn_list.is_empty() {
                                 let log_source = &comp.log_sources[i];
-                                let client = sql_conn_list.pop().unwrap();
+                                let client = sql_conn_list.pop().unwrap(); //Using unwrap is safe here because at the start of the loop we check that list is not empty
                                 let counter = db_track_change.lock().get(&log_source.name).unwrap_or(&"".to_owned()).to_string();
                                 let future = call_query(  client, &log_source.query , counter, i);
                                 //let future = call_query( &sql_conn_list, &log_source.query , counter);
@@ -198,16 +176,16 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
                             }                            
                             query_handles = futures::future::join_all(futures).await;
                             i = 0;
+                            log::info!("Checking for result of all query created in comp: {}", comp.name);
                             for query_handle in query_handles {
                                 let log_source = &comp.log_sources[i];
                                 match query_handle {
                                     Ok(rows) => {
-                                        sql_conn_list.push(rows.2);
-                                        //println!("num: {}",rows.1); //Used for makeing sure the sequence is correct
+                                        sql_conn_list.push(rows.2); //Add returned connection from call_query to the connections list                                        
                                         let rows = rows.0;
                                         if let Some(counter_field) = log_source.counter_field.clone() {
                                             track_change.insert(log_source.name.clone(), rows[0].get_filed_data_as_string(&*counter_field));
-                                            if log_source.hide_counter.unwrap() {
+                                            if log_source.hide_counter!=Option::None {
                                                 log = log.replace(&log_source.name, &rows[0].get_data(&counter_field) );
                                             }
                                             else {
@@ -218,26 +196,32 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
                                             log = log.replace(&log_source.name, &rows[0].get_data("") );
                                         }
                                     },
-                                    Err(e) => println!("Error in querying data, Original: {}", e) //Error in this section may lead to log with no integrity
+                                    Err(e) => log::error!("Log integrity fails, Error in querying data in comp: {}, OE: {}", comp.name, e) //Error in this section may lead to log with no integrity
                                 }
                                 i+=1;
                             }
-                            ///////////////////////////////////////////////
-                            log = format!("{}\n",log);
-                            match sock.send(log.as_bytes()).await {
+                            ///////////////////////////////////////////////                            
+                            match sock.send(format!("{}\n",log).as_bytes()).await {
                                 Ok(_) => {
+                                    log::debug!("Log sent to log server for comp: {}", comp.name);
                                     for item in track_change {
-                                        *db_track_change.lock().get_mut(&item.0).unwrap() = item.1;
+                                        match db_track_change.lock().get_mut(&item.0) {
+                                            Some(track_change) => *track_change = item.1,
+                                            None => log::error!("Can not find {} key in db_track_change.", item.0)
+                                        }                                        
                                     }                                    
                                 },
-                                Err(e) => println!("Error in sending log, Original error: {}",e)
+                                Err(e) => log::error!("Error in sending log for comp: {}, OE: {}", comp.name, e)
                             }
                             std::thread::sleep(two_seconds);
                             connection_wait = false;
                         }
                     }
+                    else {
+                        log::error!("Connection to all sql server in comp {} was not successful", comp.name);
+                    }
                 },
-                Err(e) => println!("Error in connecting to log server, Original Error: {}", e)
+                Err(e) => log::error!("Error in connecting to log server: {}, OE: {}", log_server, e)
             }           
         }
         if connection_wait { //Prevent from two times waiting in one cycle

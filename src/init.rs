@@ -98,7 +98,6 @@ pub enum State {
     Master,
     Slave
 }
-use serde::de::value::Error;
 use serde_derive::{Deserialize, Serialize };
 #[derive(Deserialize,Serialize)]
 pub struct ConfigData {
@@ -114,7 +113,6 @@ pub struct ConfigData {
 impl ConfigData {
     pub fn get_all_logsource_name(&self) -> Vec<(String, String)> {
         let mut v:Vec<(String,String)> = vec!();
-
         for i in 0..self.log_sources.len() {
             let item = &self.log_sources[i];
             if let Some(counter_default_value) = item.counter_default_value.clone() {
@@ -137,7 +135,9 @@ impl ConfigData {
 #[derive(Clone,Deserialize,Serialize)]
 pub struct Comp {
     pub result: String,
-    pub log_sources: Vec<LogSource>
+    pub name:String,
+    pub log_sources: Vec<LogSource>,
+    pub log_server: Option<String>
 }
 
 
@@ -156,7 +156,8 @@ pub struct LogSource {
     pub query: String,
     pub counter_field: Option<String>,
     pub counter_default_value: Option<String>,
-    pub hide_counter: Option<bool>
+    pub hide_counter: Option<bool>,
+    pub log_server: Option<String>
 }
 
 pub fn init(app_socket: String,state:Arc<Mutex<State>>) 
