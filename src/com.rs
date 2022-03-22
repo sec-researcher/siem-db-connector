@@ -1,5 +1,5 @@
 //Arc mutex for thread communication
-use std::{sync::Arc, fmt::Error};
+use std::{sync::Arc};
 use parking_lot::Mutex;
 use tokio::{ time::{self, Duration}};
 use tokio::net::TcpStream;
@@ -14,8 +14,7 @@ pub async fn connect_on_udp(log_server: &str) -> io::Result<UdpSocket> {
     sock.connect(log_server).await?;  
     io::Result::Ok(sock)    
 }
-use crate::init::ResultExt;
-
+use crate::prelude::ResultExt;
 
 pub async fn send_data(partner_address:&str, change_track:&str,start_sign:&str,end_sign:&str) -> Result<bool, std::io::Error>   {    
     match TcpStream::connect(partner_address).await {
@@ -91,17 +90,16 @@ pub async fn receive_data(socket: &mut tokio::net::TcpStream, start_sign:&str, e
 }
 
 
-pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, config_hash:String, mut config:ConfigData)   {        
-    let pause_duration = 2000;    
+pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String, config_hash:String, mut config:ConfigData)   {            
     while *state.lock()==State::MasterWaiting {
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         log::info!("Waiting for an slave to connect!!");
     }
     let mut buf = [0; 256];
-    let two_seconds = std::time::Duration::from_millis(pause_duration);
+    let ping_duration = std::time::Duration::from_millis(config.ping_duration);
     
     // In a loop, read data from the socket and write the data back.
-    'connect: loop  {
+    '_connect: loop  {
         log::info!("trying to create a connection to partner for checking partner status.");
         match TcpStream::connect(&partner_address).await {            
             Ok(mut socket) => {
@@ -132,7 +130,7 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                                         if message.len()==2 {
                                             if message[1]!=config_hash {
                                                 match socket.write_all(&format!("New config").as_bytes()).await {
-                                                    Ok(n) => {
+                                                    Ok(_n) => {
                                                         let mut msg="".to_owned();                                                            
                                                         while msg.len()<9 || &msg[msg.len()-9..]!="***END***" {
                                                             match time::timeout(Duration::from_secs(2), socket.read(&mut buf)).await.unwrap_or(Ok(0)) {   
@@ -182,7 +180,7 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                             break; //Break the loop to make a new connection
                         }                        
                     }
-                    std::thread::sleep(two_seconds);                 
+                    tokio::time::sleep(ping_duration).await;
                 }
             },
             Err(e) => {
@@ -190,7 +188,7 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                 *state.lock() = State::Master;
             }
         }
-        std::thread::sleep(two_seconds);
+        tokio::time::sleep(ping_duration).await;
     };   
 }
 

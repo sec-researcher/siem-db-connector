@@ -1,87 +1,8 @@
-#[macro_export]
-macro_rules! fatal {
-    () => {
-        log::error!("config panic");
-        panic!()
-    };
-    ($msg:expr) => {
-        log::error!($msg);
-        panic!()
-    };
-    ($msg:expr) => {
-        log::error!($msg);
-        panic!()
-    };
-    ($fmt:expr, $($arg:tt)+) => {
-        let msg = format!($fmt, $($arg)+);
-        log::error!("{}", &msg);
-        panic!()
-    };
-
-}
-
-//https://github.com/abreis/tracing-unwrap/
-use std::fmt;
-
-pub trait OptionExt<T> {
-    fn log_or(self, msg: &str, value:T) -> T;
-}
-impl<T> OptionExt<T> for Option<T> {
-    fn log_or(self, msg: &str, value:T) -> T {
-        match self {
-            Some(val) => val,
-            None => {
-                log::error!( "{}", msg);
-                value
-            }
-        }
-    }
-}
-
-pub trait ResultExt<T, E> {
-    fn log(self, msg: &str) -> T
-    where
-        E: fmt::Debug;
-    
-    fn log_or(self, msg: &str, return_value:T) -> T
-    where
-        E: fmt::Debug;
-}
-impl<T, E> ResultExt<T, E> for Result<T, E> {
-    fn log(self, msg: &str) -> T
-    where
-        E: fmt::Debug,
-    {
-        match self {
-            Ok(t) => t,
-            Err(e) => {                
-                log::error!( "{}, OE:{:?}",msg,e );
-                std::process::exit(0)
-            }
-        }
-    }
-
-    fn log_or(self, msg: &str, return_value: T) -> T
-    where
-        E: fmt::Debug,
-    {
-        match self {
-            Ok(t) => t,
-            Err(e) => {
-                log::error!( "{}, OE:{:?}",msg,e );
-                return_value
-            }
-        }
-    }
-}
-
-
-
 //Arc mutex for thread communication
 use std::{sync::Arc, collections::HashMap};
 use parking_lot::Mutex;
 //Logging dependencies
-use log::{LevelFilter, SetLoggerError};
+use log::{LevelFilter};
 use log4rs::{
     config::Config,
     append::console::{ConsoleAppender, Target},
@@ -90,6 +11,8 @@ use log4rs::{
     encode::json::JsonEncoder,
     filter::threshold::ThresholdFilter,
 };
+use tokio::io::AsyncWriteExt;
+use super::prelude::{ ResultExt, fatal};
 
 
 #[derive(PartialEq,Clone,Copy,Debug)]
@@ -99,15 +22,32 @@ pub enum State {
     Slave
 }
 use serde_derive::{Deserialize, Serialize };
-#[derive(Deserialize,Serialize)]
+
+use validator::{Validate};
+use regex::Regex;
+lazy_static! {
+    static ref IP_REG: Regex = Regex::new(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}").unwrap();
+    static ref IP_PORT_REG: Regex = Regex::new(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]{1,5}").unwrap();
+    static ref ROLE_REG: Regex = Regex::new(r"(^master$|^slave$)").unwrap();
+}
+
+
+#[derive(Deserialize,Serialize,Validate)]
 pub struct ConfigData {
+    #[validate(regex="IP_PORT_REG")]
     pub listening_addr: String,
-    pub peer_addr: String,   
+    #[validate(regex="IP_PORT_REG")]
+    pub peer_addr: String,
+    #[validate(length(min = 1))]
     pub app_socket: String,
+    #[validate(regex="ROLE_REG")]
     pub default_role: String,
-    pub pause_duration: u16, //In mili second
+    pub ping_duration: u64, //In mili second
+    #[validate(regex="IP_PORT_REG")]
     pub log_server: String,
+    #[validate]
     pub log_sources: Vec<LogSource>,
+    #[validate]
     pub comp: Vec<Comp>    
 }
 impl ConfigData {
@@ -132,32 +72,46 @@ impl ConfigData {
     
 }
 
-#[derive(Clone,Deserialize,Serialize)]
+#[derive(Clone,Deserialize,Serialize, Validate)]
 pub struct Comp {
+    #[validate(length(min = 1))]
     pub result: String,
+    #[validate(length(min = 1))]
     pub name:String,
+    #[validate]
     pub log_sources: Vec<LogSource>,
-    pub log_server: Option<String>
+    #[validate(regex="IP_PORT_REG")]
+    pub log_server: Option<String>,
+    pub pause_duration: Option<u64>,
 }
 
 
-#[derive(Deserialize,Serialize)]
+#[derive(Deserialize,Serialize,Validate)]
 pub struct LogSources {
     pub log_sources: Vec<LogSource>
 }
 
-#[derive(Clone,Deserialize,Serialize)]
+#[derive(Clone,Deserialize,Serialize, Validate)]
 pub struct LogSource {
+    #[validate(length(min = 1))]
     pub name: String,
+    #[validate(regex = "IP_REG")]
     pub addr: String,
+    #[validate(range(min = 0, max = 65535))]
     pub port: u16,
-    pub username: String,
+    #[validate(length(min = 1))]
+    pub username: String,    
     pub pass: String,
+    #[validate(length(min = 1))]
     pub query: String,
+    #[validate(length(min = 1))]
     pub counter_field: Option<String>,
+    #[validate(length(min = 1))]
     pub counter_default_value: Option<String>,
     pub hide_counter: Option<bool>,
-    pub log_server: Option<String>
+    #[validate(regex="IP_PORT_REG")]
+    pub log_server: Option<String>,
+    pub pause_duration: Option<u64>, //In mili second
 }
 
 pub fn init(app_socket: String,state:Arc<Mutex<State>>) 
@@ -165,13 +119,14 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
     use std::os::unix::net::UnixStream;
     //Check if another instance is running
     match UnixStream::connect(&app_socket) {
-        Ok(mut _stream) => {
-            // let mut response = String::new();
-            //use std::io::prelude::*; //Allow us to read and write from Unix sockets.
-            // //if let Some(response);
-            // if let Ok(i) = stream.read_to_string(&mut response) {
-            //     log::info!("Can not read response of unix socket, returned value is: {}",i);
-            // }
+        Ok(mut stream) => {
+            let mut response = String::new();
+            use std::io::prelude::*; //Allow us to read and write from Unix sockets.
+            //if let Some(response);
+            if let Ok(i) = stream.read_to_string(&mut response) {
+                println!("{}", response);
+            }
+            
             log::error!("Another instance is running, so this process will ends.");
             panic!("Another instance is running.");
         },
@@ -187,7 +142,7 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
 
 
 pub fn enable_logging()  {
-    let level = log::LevelFilter::Info;
+    let level = log::LevelFilter::Debug;
     let file_path = "./log";
     // Build a stderr logger.
     let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
@@ -225,10 +180,11 @@ pub fn enable_logging()  {
 }
 
 pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<(String,String)>) -> Arc<Mutex<HashMap<String,String>>> {    
-    let mut db_track_change: HashMap<String,String> = HashMap::new();
+    let mut db_track_change:HashMap<String,String> = HashMap::new();
     match super::com::send_data_get_response(partner_address, "init_db_track_change", "", "").await {
         Ok(data) => db_track_change = serde_json::from_str(&data).log("Can not deserialize db_track_change data received from partner"),        
-        Err(e) => { 
+        Err(e) => {
+            log::warn!("Could not connect to '{}' as partner to load db_track_change, OE: {:?}", partner_address, e);
             match std::fs::read_to_string("./db_track_change.json") {
                 Ok(mut data) => {
                     if data=="" {
@@ -260,7 +216,8 @@ pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<
 }
 
 async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
-    use std::os::unix::net::UnixListener;
+    //use std::os::unix::net::UnixListener;
+    use tokio::net::UnixListener;
     use std::io::prelude::*; //Allow us to read and write from Unix sockets.    
     if std::path::Path::new(&app_socket).exists() {
         std::fs::remove_file(&app_socket).log("There is a file in path specified by config.app_socket, this process can not delete it");        
@@ -273,21 +230,11 @@ async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
      
     // accept connections and process them, spawning a new thread for each one
     println!("Unix socket listener is waiting!!");
-    for stream in listener.incoming() {
-        match stream {
-            Ok(mut stream) => {
-                /* connection succeeded */
-                let state = Arc::clone(&state);
-                std::thread::spawn(move || {
-                    let msg;
-                    if *state.lock()==State::Master {
-                        msg = format!("Agent is Master.");
-                    }
-                    else {
-                        msg = format!("Agent is Slave.");
-                    }
-                    stream.write_all( msg.as_bytes() ).log("Error in writing to unix socket")
-                });
+    loop  {
+        match listener.accept().await {
+            Ok((mut stream, _addr)) => {
+                let msg = format!("Agent is in {:?} mode", *state.lock());
+                stream.write( msg.as_bytes() ).await.log("Error in writing to unix socket");
             }
             Err(err) => {
                 log::warn!("Creating incoming connection failed, OE: {}", err);
@@ -296,3 +243,5 @@ async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
         }
     }
 }
+
+

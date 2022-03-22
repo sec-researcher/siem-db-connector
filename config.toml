@@ -1,7 +1,7 @@
 listening_addr = "10.235.20.1:8080"
 peer_addr= "10.235.20.20:8080"    
 app_socket="/tmp/db"
-pause_duration = 2000
+ping_duration = 2000
 default_role = "master"
 log_server = "127.0.0.1:10100"
 
@@ -14,7 +14,8 @@ pass= "123"
 query= "select * FROM [test].[dbo].[identity] where id>??"
 counter_field = "id"
 counter_default_value = "0"
-log_server = "127.0.0.1:10100"
+log_server = "127.0.0.1:10200"
+pause_duration = 2000
 
 [[log_sources]]
 name="amir"

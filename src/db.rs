@@ -8,21 +8,25 @@ use std::sync::Arc;
 use parking_lot::{Mutex};
 use serde_json;
 use tokio::{ time::{self, Duration}};
-use crate::init::ResultExt;
+use crate::prelude::{ResultExt };
+use crate::prelude::RowExt;
+use std::time::{ Instant};
+
 
 
 pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,peer_addr:String)
 {
+    log::debug!("db_track_change run");
     let mut data = "".to_owned();
     loop {
         let new_data = serde_json::to_string(&*db_track_change.lock()).log_or("Can not convert db_track_change object to string", "".to_string());
-        if data!="" && data!=new_data {
+        if data!=new_data {
             log::info!("db_track_change config sync started!");
             data = new_data;
             std::fs::write("./db_track_change.json", &data).log_or("Unable to write to config.toml in sync_db_change", ());
             super::com::send_data(&peer_addr, &data,"***CHT***","***END***").await.log_or("Error in sending new config to partner.", true);
         }
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        tokio::time::sleep(std::time::Duration::from_secs(1)).await;
     }
 }
 
@@ -54,10 +58,11 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                         ,mut log_server:String)  {
     log_server = log_source_config.log_server.unwrap_or( log_server );    
     log::warn!("Call DB started for {}", log_source_config.name);
-    let two_seconds = std::time::Duration::from_millis(1000);
+    let pause_duration = std::time::Duration::from_millis(log_source_config.pause_duration.unwrap_or(2000));
     let mut counter;
     let mut connection_wait = true;
     loop {
+        let before_connection = Instant::now();
         if *state.lock()!=State::Slave {
             connection_wait = true;
             match create_sql_con(&log_source_config.username, &log_source_config.pass, &log_source_config.addr, log_source_config.port).await {
@@ -67,27 +72,25 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                         Ok(sock) => {
                             log::warn!("successfully connected to log server at {}", log_server);
                             while *state.lock()!=State::Slave {
+                                let before_query = Instant::now();
                                 counter = db_track_change.lock().get(&log_source_config.name).unwrap_or(&"".to_owned()).to_string();
                                 match call_query(  client, &log_source_config.query , counter, 0).await {
                                     Ok((rows,_i,returned_client)) => {
                                         client=returned_client;
                                         for item in rows {
                                             let log;
-                                            if let Some(counter_field) = log_source_config.counter_field.clone() {
-                                                if log_source_config.hide_counter!=Option::None {
-                                                    log = format!("{}\n",item.get_data(&counter_field));
-                                                }
-                                                else {
-                                                    log = format!("{}\n",item.get_data(""));
-                                                }                                                        
+                                            if log_source_config.counter_field!=Option::None && log_source_config.hide_counter!=Option::None {                                                
+                                                log = format!("{}\n",item.get_row_str(&log_source_config.counter_field.clone().unwrap()));     
+                                                
                                             }
                                             else {
-                                                log = format!("{}\n",item.get_data(""));
+                                                log = format!("{}\n",item.get_row_str(""));
                                             }
+                                            
                                             match sock.send(log.as_bytes()).await {
                                                 Ok(_) => {
-                                                    if let Some(counter_field) = log_source_config.counter_field.clone() {
-                                                        counter= item.get_filed_data_as_string(&*counter_field);                                                                                                                
+                                                    let counter = item.get_field_str(log_source_config.counter_field.clone());
+                                                    if counter!=""  {                                                                                                                                
                                                         match db_track_change.lock().get_mut(&log_source_config.name) {
                                                             Some(track_change) => *track_change = counter,
                                                             None => log::error!("Can not find {} key in db_track_change.", log_source_config.name)
@@ -104,7 +107,7 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                                         break;
                                     }                                    
                                 }                                
-                                std::thread::sleep(two_seconds);
+                                tokio::time::sleep(pause_duration - before_query.elapsed()).await;
                                 connection_wait = false;
                             }
                         },
@@ -115,7 +118,7 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
             }
         }
         if connection_wait { //Prevent from two times waiting in one cycle
-            std::thread::sleep(two_seconds);
+            tokio::time::sleep(pause_duration - before_connection.elapsed()).await;
         }
     }       
 }
@@ -124,10 +127,11 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
 
 pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<Mutex<HashMap<String,String>>>,mut log_server:String)  {    
     log_server = comp.log_server.unwrap_or( log_server );
-    let two_seconds = std::time::Duration::from_millis(1000);
+    let pause_duration = std::time::Duration::from_millis(comp.pause_duration.unwrap_or(2000));
     //let mut counter;
     let mut connection_wait = true;
     loop {
+        let before_connection = Instant::now();
         if *state.lock()!=State::Slave {
             let mut sql_conn_list = vec!();
             let mut connections = vec!();
@@ -157,6 +161,7 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
                     log::warn!("Connected to log server {}", log_server);
                     if sql_conn_list.len()==comp.log_sources.len() { //Make sure that connection to all server was success                                                
                         while *state.lock()!=State::Slave {
+                            let before_query = Instant::now();
                             let mut track_change: HashMap<String,String> = HashMap::new();
                             let mut log = comp.result.clone();
                             let mut query_handles = vec!();
@@ -184,16 +189,16 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
                                         sql_conn_list.push(rows.2); //Add returned connection from call_query to the connections list                                        
                                         let rows = rows.0;
                                         if let Some(counter_field) = log_source.counter_field.clone() {
-                                            track_change.insert(log_source.name.clone(), rows[0].get_filed_data_as_string(&*counter_field));
+                                            track_change.insert(log_source.name.clone(), rows[0].get_field_str(Some(counter_field.clone())) );
                                             if log_source.hide_counter!=Option::None {
-                                                log = log.replace(&log_source.name, &rows[0].get_data(&counter_field) );
+                                                log = log.replace(&log_source.name, &rows[0].get_row_str(&counter_field) );
                                             }
                                             else {
-                                                log = log.replace(&log_source.name, &rows[0].get_data("") );
+                                                log = log.replace(&log_source.name, &rows[0].get_row_str("") );
                                             }                                            
                                         }
                                         else {
-                                            log = log.replace(&log_source.name, &rows[0].get_data("") );
+                                            log = log.replace(&log_source.name, &rows[0].get_row_str("") );
                                         }
                                     },
                                     Err(e) => log::error!("Log integrity fails, Error in querying data in comp: {}, OE: {}", comp.name, e) //Error in this section may lead to log with no integrity
@@ -213,7 +218,7 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
                                 },
                                 Err(e) => log::error!("Error in sending log for comp: {}, OE: {}", comp.name, e)
                             }
-                            std::thread::sleep(two_seconds);
+                            tokio::time::sleep(pause_duration - before_query.elapsed()).await;
                             connection_wait = false;
                         }
                     }
@@ -225,7 +230,7 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
             }           
         }
         if connection_wait { //Prevent from two times waiting in one cycle
-            std::thread::sleep(two_seconds);
+            tokio::time::sleep(pause_duration - before_connection.elapsed()).await;
         }
     }       
 }

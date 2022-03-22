@@ -10,16 +10,25 @@ mod init;
 //---------------------------------------------------------
 mod com;
 mod db;
+mod prelude;
+#[macro_use]
+extern crate lazy_static;
 
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 100)]
+#[tokio::main(flavor = "multi_thread", worker_threads = 1)]
 async fn main() -> Result<(), Box<dyn Error>> {
-    use init::ResultExt;
+    use prelude::ResultExt;
     init::enable_logging();
     use sha2::{Sha256, Digest};
     let mut hasher = Sha256::new();
     let config_text= std::fs::read_to_string("config.toml").log("Can not read file").parse::<String>().log("Error in parsing");
     let config: ConfigData = toml::from_str(&config_text).log("config.toml syntax error.");
+
+    use validator::{Validate, ValidationError};
+    match config.validate() {
+        Ok(_) => (),
+        Err(e) => { prelude::fatal!("Error: {}",e); () }
+    }
     let all_log_sources_name = config.get_all_logsource_name();
     let log_sources =  LogSources { log_sources: config.log_sources};
     let log_sources_text = toml::to_string(&log_sources).log("config.toml syntax error.");

@@ -6,7 +6,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tiberius = "*"
+tiberius = { version = "*", features = ["chrono"] }
 tokio = { version = "*", features = ["full"] }
 tokio-util={ version = "*", features = ["full"] }
 futures = "0.3.21"
@@ -25,3 +25,16 @@ serde_json="*"
 #Logging
 log="*"
 log4rs="*"
+
+
+#tiberius datetime type conversion
+chrono = "0.4.19"
+date_time = "2.2.0"
+
+
+#validation
+validator = { version = "0.14", features = ["derive"] }
+regex = "1.5.5"
+
+#being able to use global var.
+lazy_static = "1.4.0"
