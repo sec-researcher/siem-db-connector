@@ -146,7 +146,7 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
 
 pub fn enable_logging()  {
     let level = log::LevelFilter::Warn;
-    let file_path = "/var/mslog/log";
+    let file_path = "/var/log/mslog/log";
     // Build a stderr logger.
     let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
     // Logging to log file.
@@ -188,7 +188,7 @@ pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<
         Ok(data) => db_track_change = serde_json::from_str(&data).log("Can not deserialize db_track_change data received from partner"),        
         Err(e) => {
             log::warn!("Could not connect to '{}' as partner to load db_track_change, OE: {:?}", partner_address, e);
-            match std::fs::read_to_string("/var/mslog/db_track_change.json") {
+            match std::fs::read_to_string("/var/log/mslog/db_track_change.json") {
                 Ok(mut data) => {
                     if data=="" {
                         data="{}".to_owned();
@@ -210,7 +210,7 @@ pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<
                     }
                 }
                 Err(e) => {
-                    fatal!("Error in reading file content /var/mslog/db_track_change.json, OE:{}",e);                    
+                    fatal!("Error in reading file content /var/log/mslog/db_track_change.json, OE:{}",e);                    
                 }
             }
         }
