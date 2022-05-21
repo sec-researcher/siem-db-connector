@@ -2,8 +2,13 @@
 name = "mssql"
 version = "0.1.0"
 edition = "2018"
+license = "GPL"
+description="test"
 
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+[package.metadata.generate-rpm]
+package-name = "mssql"
+assets = [{source="target/release/mssql" ,dest="/usr/bin/mssql", mode="755", config=true, doc=false} ]
+
 
 [dependencies]
 tiberius = { version = "*", features = ["chrono"] }
@@ -38,3 +43,12 @@ regex = "1.5.5"
 
 #being able to use global var.
 lazy_static = "1.4.0"
+
+# Add openssl-sys as a direct dependency so it can be cross compiled to
+# x86_64-unknown-linux-musl using the "vendored" feature below
+openssl-sys = "*"
+
+[features]
+# Force openssl-sys to staticly link in the openssl library. Necessary when
+# cross compiling to x86_64-unknown-linux-musl.
+vendored = ["openssl-sys/vendored"]

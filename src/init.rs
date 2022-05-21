@@ -26,9 +26,9 @@ use serde_derive::{Deserialize, Serialize };
 use validator::{Validate};
 use regex::Regex;
 lazy_static! {
-    static ref IP_REG: Regex = Regex::new(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}").unwrap();
-    static ref IP_PORT_REG: Regex = Regex::new(r"[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]{1,5}").unwrap();
-    static ref ROLE_REG: Regex = Regex::new(r"(^master$|^slave$)").unwrap();
+    static ref IP_REG: Regex = Regex::new(r"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$").unwrap();
+    static ref IP_PORT_REG: Regex = Regex::new(r"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]{1,5}$").unwrap();
+    static ref ROLE_REG: Regex = Regex::new(r"^(master|slave)$").unwrap();
 }
 
 
@@ -48,7 +48,7 @@ pub struct ConfigData {
     #[validate]
     pub log_sources: Vec<LogSource>,
     #[validate]
-    pub comp: Vec<Comp>    
+    pub comp: Option<Vec<Comp>>
 }
 impl ConfigData {
     pub fn get_all_logsource_name(&self) -> Vec<(String, String)> {
@@ -58,14 +58,17 @@ impl ConfigData {
             if let Some(counter_default_value) = item.counter_default_value.clone() {
                 v.push((item.name.clone(), counter_default_value.clone()));
             }            
-        }
-        for comp in &self.comp {
-            for item in &comp.log_sources {
-                if let Some(counter_default_value) = item.counter_default_value.clone() {
-                    v.push((item.name.clone(), counter_default_value.clone()));
+        }        
+        if let Some(complicated) = &self.comp {
+            for comp in complicated {
+                for item in &comp.log_sources {
+                    if let Some(counter_default_value) = item.counter_default_value.clone() {
+                        v.push((item.name.clone(), counter_default_value.clone()));
+                    }
                 }
             }
         }
+        
         v
     }
     
@@ -142,8 +145,8 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
 
 
 pub fn enable_logging()  {
-    let level = log::LevelFilter::Debug;
-    let file_path = "./log";
+    let level = log::LevelFilter::Warn;
+    let file_path = "/var/mslog/log";
     // Build a stderr logger.
     let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
     // Logging to log file.
@@ -185,7 +188,7 @@ pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<
         Ok(data) => db_track_change = serde_json::from_str(&data).log("Can not deserialize db_track_change data received from partner"),        
         Err(e) => {
             log::warn!("Could not connect to '{}' as partner to load db_track_change, OE: {:?}", partner_address, e);
-            match std::fs::read_to_string("./db_track_change.json") {
+            match std::fs::read_to_string("/var/mslog/db_track_change.json") {
                 Ok(mut data) => {
                     if data=="" {
                         data="{}".to_owned();
@@ -207,7 +210,7 @@ pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<
                     }
                 }
                 Err(e) => {
-                    fatal!("Error in reading file content, OE:{}",e);                    
+                    fatal!("Error in reading file content /var/mslog/db_track_change.json, OE:{}",e);                    
                 }
             }
         }

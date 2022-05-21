@@ -21,8 +21,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     init::enable_logging();
     use sha2::{Sha256, Digest};
     let mut hasher = Sha256::new();
-    let config_text= std::fs::read_to_string("config.toml").log("Can not read file").parse::<String>().log("Error in parsing");
-    let config: ConfigData = toml::from_str(&config_text).log("config.toml syntax error.");
+    let config_text= std::fs::read_to_string("/etc/mslog.toml").log("Can not read file").parse::<String>().log("Error in parsing");
+    let config: ConfigData = toml::from_str(&config_text).log("/etc/mslog.toml syntax error.");
 
     use validator::{Validate, ValidationError};
     match config.validate() {
@@ -31,7 +31,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     let all_log_sources_name = config.get_all_logsource_name();
     let log_sources =  LogSources { log_sources: config.log_sources};
-    let log_sources_text = toml::to_string(&log_sources).log("config.toml syntax error.");
+    let log_sources_text = toml::to_string(&log_sources).log("/etc/mslog.toml syntax error.");
     hasher.update(log_sources_text.as_bytes());
     let config_hash = format!("{:x}",hasher.finalize());
     let state;
@@ -50,11 +50,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Listening on network started!");
     tokio::spawn(com::check_partner_status(Arc::clone(&state), config.peer_addr.clone(),config_hash.to_owned(), toml::from_str(&config_text).unwrap()));
     
-    for comp in config.comp {
-        tokio::spawn(
-        db::call_comp(Arc::clone(&state), comp, Arc::clone(&db_track_change), config.log_server.clone())
-        );
+    if let Some(complicated) = config.comp {
+        for comp in complicated {
+            tokio::spawn(
+            db::call_comp(Arc::clone(&state), comp, Arc::clone(&db_track_change), config.log_server.clone())
+            );
+        }
     }
+    
     
     for log_source in log_sources.log_sources {                
         tokio::spawn(
