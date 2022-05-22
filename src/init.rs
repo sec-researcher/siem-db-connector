@@ -12,6 +12,8 @@ use log4rs::{
     filter::threshold::ThresholdFilter,
 };
 use tokio::io::AsyncWriteExt;
+use crate::com::ComError;
+
 use super::prelude::{ ResultExt, fatal};
 
 
@@ -145,7 +147,7 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
 
 
 pub fn enable_logging()  {
-    let level = log::LevelFilter::Warn;
+    let level = log::LevelFilter::Info;
     let file_path = "/var/log/mslog/log";
     // Build a stderr logger.
     let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
@@ -183,8 +185,14 @@ pub fn enable_logging()  {
 }
 
 pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<(String,String)>) -> Arc<Mutex<HashMap<String,String>>> {    
+    use tokio::{ time::{self, Duration}};
     let mut db_track_change:HashMap<String,String> = HashMap::new();
-    match super::com::send_data_get_response(partner_address, "init_db_track_change", "", "").await {
+
+    match time::timeout(Duration::from_secs(2), 
+        super::com::send_data_get_response(partner_address, "init_db_track_change", "", "")).await.unwrap_or(
+            Err(ComError::CustomError("Timeout"))
+        ) {
+    //match super::com::send_data_get_response(partner_address, "init_db_track_change", "", "").await {
         Ok(data) => db_track_change = serde_json::from_str(&data).log("Can not deserialize db_track_change data received from partner"),        
         Err(e) => {
             log::warn!("Could not connect to '{}' as partner to load db_track_change, OE: {:?}", partner_address, e);
@@ -194,7 +202,7 @@ pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<
                         data="{}".to_owned();
                         log::info!("db_track_change.json is empty");
                     }
-                    db_track_change = serde_json::from_str(&data).log("Can not deserialize db_track_change data readed from disk");                    
+                    db_track_change = serde_json::from_str(&data).log("Can not deserialize db_track_change data readed from disk");
                     for item in all_log_sources_name {                        
                         match db_track_change.get_mut(&item.0) {
                             Some(value) => { 

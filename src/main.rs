@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     tokio::spawn(db::sync_db_change(Arc::clone(&db_track_change),config.peer_addr.clone()));
     loop {
         let (socket, _) = listener.accept().await?;        
-        tokio::spawn(com::process_incominng(socket, Arc::clone(&state),
+        tokio::spawn(com::process_incoming(socket, Arc::clone(&state),
         config_hash.to_owned(), log_sources_text.clone(), Arc::clone(&db_track_change)));
     }
 }

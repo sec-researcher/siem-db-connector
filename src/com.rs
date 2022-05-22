@@ -100,10 +100,10 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
     
     // In a loop, read data from the socket and write the data back.
     '_connect: loop  {
-        log::info!("trying to create a connection to partner for checking partner status.");
+        log::warn!("trying to create a connection to partner for checking partner status.");
         match TcpStream::connect(&partner_address).await {            
             Ok(mut socket) => {
-                'write: loop {                    
+                'write: loop {       
                     match socket.write_all(&format!("What's up?\n").as_bytes()).await {                        
                         Ok(_) => {
                             log::info!("What's up message sent to check partner status.");
@@ -112,7 +112,7 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                                 //agent to master mode, but it's not appropriate way and made false positive logs.         
                                 // socket closed                    
                                 Ok(n) if n==0 => { //0 means socket closed or timeout happend in above line
-                                    log::warn!("This agent go to master mode because Answer with 0 length received or connection timed out");
+                                    log::warn!("This agent go to master mode because answer with 0 length received or connection timed out");
                                     *state.lock() = State::Master;
                                 },
                                 Ok(n) => {
@@ -165,19 +165,19 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                                         }
                                         log::warn!("This agent go to slave mode, Because other side is in master mode");
                                         *state.lock() = State::Slave;
-                                        }
+                                    }
                                 },
                                 Err(e) => {                
                                     *state.lock() = State::Master;
                                     log::warn!("This agent go to master mode because failed to read from socket, OE: {}", e);
-                                    break;//Break the loop to make a new connection
+                                    break 'write;//Break the loop to make a new connection
                                 }
                             }
                             //------------------------
                         },
                         Err(e) => {
                             log::error!("An error hapeened in sending what's up request,OE: {}", e);
-                            break; //Break the loop to make a new connection
+                            break 'write; //Break the loop to make a new connection
                         }                        
                     }
                     tokio::time::sleep(ping_duration).await;
@@ -192,7 +192,7 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
     };   
 }
 
-pub async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>,
+pub async fn process_incoming(mut socket:tokio::net::TcpStream, state:Arc<Mutex<State>>,
     config_hash:String,log_sources_text:String,db_track_change: Arc<Mutex<HashMap<String,String>>>) {
     {        
         let mut buf = [0; 1024]; 
