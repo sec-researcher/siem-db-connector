@@ -23,7 +23,7 @@ pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,
         if data!=new_data {
             log::info!("db_track_change config sync started!");
             data = new_data;
-            std::fs::write("./db_track_change.json", &data).log_or("Unable to write to config.toml in sync_db_change", ());
+            std::fs::write("/var/log/mslog/db_track_change.json", &data).log_or("Unable to write to /var/log/mslog/db_track_change.json in sync_db_change", ());
             super::com::send_data(&peer_addr, &data,"***CHT***","***END***").await.log_or("Error in sending new config to partner.", true);
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
@@ -32,8 +32,7 @@ pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,
 
 
 use tokio_util::compat::Compat;
-pub async fn create_sql_con(username:&str,pass:&str,addr:&str,port:u16) -> Result<Client<Compat<TcpStream>>,tiberius::error::Error>  {
-    println!("Call DB");
+pub async fn create_sql_con(username:&str,pass:&str,addr:&str,port:u16) -> Result<Client<Compat<TcpStream>>,tiberius::error::Error>  {    
     let mut config = Config::new();
     config.host(addr);
     config.port(port);
@@ -107,7 +106,7 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                                         break;
                                     }                                    
                                 }                                
-                                tokio::time::sleep(pause_duration - before_query.elapsed()).await;
+                                pause(pause_duration, before_query.elapsed()).await;
                                 connection_wait = false;
                             }
                         },
@@ -118,11 +117,17 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
             }
         }
         if connection_wait { //Prevent from two times waiting in one cycle
-            tokio::time::sleep(pause_duration - before_connection.elapsed()).await;
+            pause(pause_duration, before_connection.elapsed()).await;
         }
     }       
 }
 
+
+pub async fn pause(pause_duration: Duration, elapsed: Duration) {
+    if elapsed<pause_duration {
+        tokio::time::sleep(pause_duration - elapsed).await;
+    }
+}
 //-----------------------------------------*********************************************************************>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
 
 pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<Mutex<HashMap<String,String>>>,mut log_server:String)  {    
@@ -217,8 +222,9 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
                                     }                                    
                                 },
                                 Err(e) => log::error!("Error in sending log for comp: {}, OE: {}", comp.name, e)
-                            }
-                            tokio::time::sleep(pause_duration - before_query.elapsed()).await;
+                            }                            
+                            
+                            pause(pause_duration, before_query.elapsed()).await;
                             connection_wait = false;
                         }
                     }
@@ -230,7 +236,7 @@ pub async fn call_comp(state:Arc<Mutex<State>>,comp:Comp, db_track_change: Arc<M
             }           
         }
         if connection_wait { //Prevent from two times waiting in one cycle
-            tokio::time::sleep(pause_duration - before_connection.elapsed()).await;
+            pause(pause_duration, before_connection.elapsed()).await;                        
         }
-    }       
+    }
 }

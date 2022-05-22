@@ -150,7 +150,7 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                                                                 Ok(log_sources) => {
                                                                     config.log_sources = log_sources.log_sources;
                                                                     msg = toml::to_string(&config).log_or("Can not convert toml object to string, empty string will be return", "".to_string());
-                                                                    std::fs::write("./config.toml", msg).log_or("Unable to write to config.toml",());
+                                                                    std::fs::write("/etc/mslog.toml", msg).log_or("Unable to write to /etc/mslog.toml",());
                                                                     use std::os::unix::process::CommandExt;
                                                                     log::warn!("App will restart for setting new config, result: {}", std::process::Command::new("/proc/self/exe").exec());
                                                                     std::process::exit(0);
@@ -247,7 +247,7 @@ pub async fn process_incominng(mut socket:tokio::net::TcpStream, state:Arc<Mutex
                                 match serde_json::from_str(&data) {
                                     Ok(json) => {
                                         *db_track_change.lock() = json;
-                                        std::fs::write("./db_track_change.json", data).log_or("Unable to write to db_track_change.json", ());
+                                        std::fs::write("/var/log/mslog/db_track_change.json", data).log_or("Unable to write to db_track_change.json", ());
                                     },
                                     Err(e) => log::error!("Can not convert db_track_change data received over net to json, OE: {}",e)
                                 }
