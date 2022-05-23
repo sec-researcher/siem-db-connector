@@ -1,5 +1,5 @@
 //Arc mutex for thread communication
-use std::{sync::Arc};
+use std::{sync::Arc, io::Error};
 use parking_lot::Mutex;
 use tokio::{ time::{self, Duration}};
 use tokio::net::TcpStream;
@@ -17,7 +17,9 @@ pub async fn connect_on_udp(log_server: &str) -> io::Result<UdpSocket> {
 use crate::prelude::ResultExt;
 
 pub async fn send_data(partner_address:&str, change_track:&str,start_sign:&str,end_sign:&str) -> Result<bool, std::io::Error>   {    
-    match TcpStream::connect(partner_address).await {
+    match time::timeout(Duration::from_secs(2), 
+        TcpStream::connect(&partner_address)).await.unwrap_or(Err(Error::last_os_error())         ) {
+    //match TcpStream::connect(partner_address).await {
         Ok(mut socket) => {
                 match socket.write_all(&format!("{}{}{}", start_sign,change_track, end_sign).as_bytes()).await {                        
                     Ok(_) => {
@@ -100,10 +102,13 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
     
     // In a loop, read data from the socket and write the data back.
     '_connect: loop  {
-        log::warn!("trying to create a connection to partner for checking partner status.");
-        match TcpStream::connect(&partner_address).await {            
+        log::info!("trying to create a connection to partner for checking partner status.");
+        match time::timeout(Duration::from_secs(2), 
+        TcpStream::connect(&partner_address)).await.unwrap_or(Err(Error::last_os_error())         ) {
+        //match TcpStream::connect(&partner_address).await {            
             Ok(mut socket) => {
-                'write: loop {       
+                'write: loop {
+                    log::info!("starting of write loop");
                     match socket.write_all(&format!("What's up?\n").as_bytes()).await {                        
                         Ok(_) => {
                             log::info!("What's up message sent to check partner status.");
@@ -123,7 +128,7 @@ pub async fn check_partner_status(state:Arc<Mutex<State>>,partner_address:String
                                     }
                                     else if message=="I'm slave\n" {
                                         *state.lock() = State::Master;
-                                        log::warn!("This agent go to master mode because incorrect message received from partner")
+                                        log::warn!("This agent go to master mode because I'm slave message received from partner")
                                     }
                                     else { //If message!="I'm slave\n", It's I'm master+query config hash splitted by \n
                                         let message = message.split("\n").collect::<Vec<&str>>();
@@ -197,7 +202,8 @@ pub async fn process_incoming(mut socket:tokio::net::TcpStream, state:Arc<Mutex<
     {        
         let mut buf = [0; 1024]; 
         // In a loop, read data from the socket and write the data back.
-        loop {            
+        loop {
+            log::info!("starting of process_incoming loop");         
             match socket.read(&mut buf).await {                    
                 // socket closed                    
                 Ok(n) if n ==0 => {
