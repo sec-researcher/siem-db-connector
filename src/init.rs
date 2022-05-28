@@ -30,6 +30,7 @@ use regex::Regex;
 lazy_static! {
     static ref IP_REG: Regex = Regex::new(r"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$").unwrap();
     static ref IP_PORT_REG: Regex = Regex::new(r"^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:[0-9]{1,5}$").unwrap();
+    static ref MULTI_IP_PORT_REG: Regex = Regex::new(r"^([0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}:\d{1,5},?)+$").unwrap();
     static ref ROLE_REG: Regex = Regex::new(r"^(master|slave)$").unwrap();
 }
 
@@ -45,7 +46,7 @@ pub struct ConfigData {
     #[validate(regex="ROLE_REG")]
     pub default_role: String,
     pub ping_duration: u64, //In mili second
-    #[validate(regex="IP_PORT_REG")]
+    #[validate(regex="MULTI_IP_PORT_REG")]
     pub log_server: String,
     #[validate]
     pub log_sources: Vec<LogSource>,
@@ -69,12 +70,9 @@ impl ConfigData {
                     }
                 }
             }
-        }
-        
+        }        
         v
-    }
-    
-    
+    }    
 }
 
 #[derive(Clone,Deserialize,Serialize, Validate)]
@@ -85,7 +83,7 @@ pub struct Comp {
     pub name:String,
     #[validate]
     pub log_sources: Vec<LogSource>,
-    #[validate(regex="IP_PORT_REG")]
+    #[validate(regex="MULTI_IP_PORT_REG")]
     pub log_server: Option<String>,
     pub pause_duration: Option<u64>,
 }
@@ -114,7 +112,7 @@ pub struct LogSource {
     #[validate(length(min = 1))]
     pub counter_default_value: Option<String>,
     pub hide_counter: Option<bool>,
-    #[validate(regex="IP_PORT_REG")]
+    #[validate(regex="MULTI_IP_PORT_REG")]
     pub log_server: Option<String>,
     pub pause_duration: Option<u64>, //In mili second
 }
@@ -143,23 +141,42 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
     }
 }
 
-
-
-
 pub fn enable_logging()  {
+    use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
+    use log4rs::append::rolling_file::policy::compound::{ roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger };
+    use log4rs::append::rolling_file::RollingFileAppender;
+    use log4rs::encode::pattern::PatternEncoder;
     let level = log::LevelFilter::Info;
     let file_path = "/var/log/mslog/log";
     // Build a stderr logger.
     let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
-    // Logging to log file.
+    // JSON log format
     let logfile = FileAppender::builder()
         // Pattern: https://docs.rs/log4rs/*/log4rs/encode/pattern/index.html
         .encoder(Box::new(JsonEncoder::new()))
         .build(file_path)
         .expect("Error in createing log4rs FileAppender");
+    
+    let log_line_pattern = "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}";
+    let trigger_size = byte_unit::n_mb_bytes!(30) as u64;
+    let trigger = Box::new(SizeTrigger::new(trigger_size));    
+    let roller_pattern = "/var/log/mslog/log_{}.gz";
+    let roller_count = 5;
+    let roller_base = 1;
+    let roller = Box::new(
+        FixedWindowRoller::builder()
+            .base(roller_base)
+            .build(roller_pattern, roller_count)
+            .unwrap(),
+    );    
+    let compound_policy = Box::new(CompoundPolicy::new(trigger, roller));    
+    let logfile = RollingFileAppender::builder()
+        .encoder(Box::new(PatternEncoder::new(log_line_pattern)))
+        .build("/var/log/mslog/log", compound_policy)
+        .unwrap();
 
     // Log Trace level output to file where trace is the default level
-    // and the programmatically specified level to stderr.
+    // and the programmatically specified level to stderr.    
     let config = Config::builder()
         .appender(Appender::builder()
             .filter(Box::new(ThresholdFilter::new(level)))
@@ -177,12 +194,66 @@ pub fn enable_logging()  {
         )
         .expect("Error in building log4rs config");
 
+
+        
     // Use this to change log levels at runtime.
     // This means you can change the default log level to trace
     // if you are trying to debug an issue and need more logs on then turn it off
     // once you are done.
     let _handle = log4rs::init_config(config).expect("Error in initializing log4rs config");
 }
+
+// pub fn enable_logging() {
+//     use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
+//     use log4rs::append::rolling_file::policy::compound::{
+//         roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger,
+//     };
+//     use log4rs::append::rolling_file::RollingFileAppender;
+
+//     use log4rs::encode::pattern::PatternEncoder;
+
+//     use log4rs::config::{Logger};
+
+//     let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
+//     let log_line_pattern = "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}";
+
+//     let trigger_size = byte_unit::n_mb_bytes!(30) as u64;
+//     let trigger = Box::new(SizeTrigger::new(trigger_size));
+
+//     let roller_pattern = "/var/log/mslog/log_{}.gz";
+//     let roller_count = 5;
+//     let roller_base = 1;
+//     let roller = Box::new(
+//         FixedWindowRoller::builder()
+//             .base(roller_base)
+//             .build(roller_pattern, roller_count)
+//             .unwrap(),
+//     );
+
+//     let compound_policy = Box::new(CompoundPolicy::new(trigger, roller));
+
+//     let step_ap = RollingFileAppender::builder()
+//         .encoder(Box::new(PatternEncoder::new(log_line_pattern)))
+//         .build("/var/log/mslog/log", compound_policy)
+//         .unwrap();
+    
+      
+
+//     let config = Config::builder()
+//         .appender(Appender::builder().build("stdout", Box::new(stderr)))
+//         .appender(Appender::builder().build("step_ap", Box::new(step_ap)))        
+//         .logger(
+//             Logger::builder()
+//                 .appender("step_ap")
+//                 .build("step", LevelFilter::Debug),
+//         )        
+//         .build(Root::builder().appender("stdout").build(LevelFilter::Debug))
+//         .unwrap();
+
+//     // You can use handle to change logger config at runtime
+//     let handle = log4rs::init_config(config).unwrap();
+// }
+
 
 pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<(String,String)>) -> Arc<Mutex<HashMap<String,String>>> {    
     use tokio::{ time::{self, Duration}};

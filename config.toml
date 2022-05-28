@@ -14,6 +14,6 @@ pass= "123"
 query= "select * FROM [test].[dbo].[identity] where id>??"
 counter_field = "id"
 counter_default_value = "0"
-log_server = "127.0.0.1:10200"
+log_server = "127.0.0.1:10200&127.0.0.2:10100"
 pause_duration = 2000
 

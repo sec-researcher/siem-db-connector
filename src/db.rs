@@ -55,7 +55,8 @@ pub async fn call_query(mut client: Client<Compat<TcpStream>>, query:&str,counte
 
 pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_track_change: Arc<Mutex<HashMap<String,String>>>
                         ,mut log_server:String)  {
-    log_server = log_source_config.log_server.unwrap_or( log_server );    
+    log_server = log_source_config.log_server.unwrap_or( log_server );
+    let log_servers = log_server.split(",").collect::<Vec<&str>>();
     log::warn!("Call DB started for {}", log_source_config.name);
     let pause_duration = std::time::Duration::from_millis(log_source_config.pause_duration.unwrap_or(2000));
     let mut counter;
@@ -68,25 +69,43 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
             match create_sql_con(&log_source_config.username, &log_source_config.pass, &log_source_config.addr, log_source_config.port).await {
                 Ok(mut client)=> {
                     log::warn!("successfully connect and Auth to {}", log_source_config.name);
-                    match super::com::connect_on_udp(&log_server).await {
-                        Ok(sock) => {
-                            log::warn!("successfully connected to log server at {}", log_server);
-                            while *state.lock()!=State::Slave {
-                                let before_query = Instant::now();
-                                counter = db_track_change.lock().get(&log_source_config.name).unwrap_or(&"".to_owned()).to_string();
-                                match call_query(  client, &log_source_config.query , counter, 0).await {
-                                    Ok((rows,_i,returned_client)) => {
-                                        client=returned_client;
-                                        for item in rows {
-                                            let log;
-                                            if log_source_config.counter_field!=Option::None && log_source_config.hide_counter!=Option::None {                                                
-                                                log = format!("{}\n",item.get_row_str(&log_source_config.counter_field.clone().unwrap()));     
-                                                
-                                            }
-                                            else {
-                                                log = format!("{}\n",item.get_row_str(""));
-                                            }
-                                            
+                    
+                    let mut futures = vec!();
+                    let mut sockets = vec!();
+                    log::warn!("Start of connecting to log servers");
+                    for log_server in &log_servers {
+                        let future = super::com::connect_on_udp(&log_server);                        
+                        futures.push(future);
+                    }
+                    let connections = futures::future::join_all(futures).await;
+                    let mut i=0;
+                    for connection in connections { //Usage is for error handling and making sure are connection made successfully
+                        match connection {
+                            Ok(socket) => {
+                                sockets.push(socket);
+                            },
+                            Err(e) => log::error!("Error in connecting to log server: {}, OE: {}", log_servers[i], e)
+                        }
+                        i+=1;
+                    }
+                                        
+                    if sockets.len()>0  {
+                        log::warn!("successfully connected to log server at {}", log_server);
+                        while *state.lock()!=State::Slave {
+                            let before_query = Instant::now();
+                            counter = db_track_change.lock().get(&log_source_config.name).unwrap_or(&"".to_owned()).to_string();
+                            match call_query(  client, &log_source_config.query , counter, 0).await {
+                                Ok((rows,_i,returned_client)) => {
+                                    client=returned_client;
+                                    for item in rows {
+                                        let log;
+                                        if log_source_config.counter_field!=Option::None && log_source_config.hide_counter!=Option::None {                                                
+                                            log = format!("{}\n",item.get_row_str(&log_source_config.counter_field.clone().unwrap()));
+                                        }
+                                        else {
+                                            log = format!("{}\n",item.get_row_str(""));
+                                        }
+                                        for sock in &sockets {
                                             match sock.send(log.as_bytes()).await {
                                                 Ok(_) => {
                                                     let counter = item.get_field_str(log_source_config.counter_field.clone());
@@ -99,20 +118,24 @@ pub async fn call_db(state:Arc<Mutex<State>>,log_source_config:LogSource, db_tra
                                                     log::debug!("{}", log)
                                                 },
                                                 Err(e) => log::error!("Error in sending log, OE: {}",e)
-                                            }                                
-                                        }
-                                    },
-                                    Err(e) => {
-                                        log::error!("Error on calling query&fetching result, OE: {}", e);
-                                        break;
-                                    }                                    
-                                }                                
-                                pause(pause_duration, before_query.elapsed()).await;
-                                connection_wait = false;
-                            }
-                        },
-                        Err(e) => log::error!("Error in connecting to log server: {}, OE: {}", log_server, e)
-                    }                    
+                                            }
+                                        }                                                                        
+                                    }
+                                },
+                                Err(e) => {
+                                    log::error!("Error on calling query&fetching result, OE: {}", e);
+                                    break;
+                                }                                    
+                            }                                
+                            pause(pause_duration, before_query.elapsed()).await;
+                            connection_wait = false;
+                        }                        
+                    }
+                    else {
+                        //Err(e) => log::error!("Error in connecting to log server: {}, OE: {}", log_server, e)                        
+                    }
+                    
+                                        
                 },
                 Err(e) => log::error!("Error in connectimg to {}({}), OE: {}", log_source_config.name, log_source_config.addr, e )
             }
