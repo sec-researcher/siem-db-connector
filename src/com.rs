@@ -270,3 +270,26 @@ pub async fn process_incoming(mut socket:tokio::net::TcpStream, state:Arc<Mutex<
         }
     }
 }
+
+pub async fn create_udp_sockets_concurrently(log_servers: &Vec<&str>) -> Vec<tokio::net::UdpSocket> {
+    let mut futures = vec!();
+    let mut sockets = vec!();
+    log::warn!("Start of connecting to log servers");
+    for log_server in log_servers {
+        let future = super::com::connect_on_udp(&log_server);                        
+        futures.push(future);
+    }
+    let connections = futures::future::join_all(futures).await;
+    let mut i=0;
+    for connection in connections { //Usage is for error handling and making sure are connection made successfully
+        match connection {
+            Ok(socket) => {
+                sockets.push(socket);
+            },
+            Err(e) => log::error!("Error in connecting to log server: {}, OE: {}", log_servers[i], e)
+        }
+        i+=1;
+    }
+
+    sockets
+}

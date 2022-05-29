@@ -203,56 +203,7 @@ pub fn enable_logging()  {
     let _handle = log4rs::init_config(config).expect("Error in initializing log4rs config");
 }
 
-// pub fn enable_logging() {
-//     use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
-//     use log4rs::append::rolling_file::policy::compound::{
-//         roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger,
-//     };
-//     use log4rs::append::rolling_file::RollingFileAppender;
 
-//     use log4rs::encode::pattern::PatternEncoder;
-
-//     use log4rs::config::{Logger};
-
-//     let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
-//     let log_line_pattern = "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}";
-
-//     let trigger_size = byte_unit::n_mb_bytes!(30) as u64;
-//     let trigger = Box::new(SizeTrigger::new(trigger_size));
-
-//     let roller_pattern = "/var/log/mslog/log_{}.gz";
-//     let roller_count = 5;
-//     let roller_base = 1;
-//     let roller = Box::new(
-//         FixedWindowRoller::builder()
-//             .base(roller_base)
-//             .build(roller_pattern, roller_count)
-//             .unwrap(),
-//     );
-
-//     let compound_policy = Box::new(CompoundPolicy::new(trigger, roller));
-
-//     let step_ap = RollingFileAppender::builder()
-//         .encoder(Box::new(PatternEncoder::new(log_line_pattern)))
-//         .build("/var/log/mslog/log", compound_policy)
-//         .unwrap();
-    
-      
-
-//     let config = Config::builder()
-//         .appender(Appender::builder().build("stdout", Box::new(stderr)))
-//         .appender(Appender::builder().build("step_ap", Box::new(step_ap)))        
-//         .logger(
-//             Logger::builder()
-//                 .appender("step_ap")
-//                 .build("step", LevelFilter::Debug),
-//         )        
-//         .build(Root::builder().appender("stdout").build(LevelFilter::Debug))
-//         .unwrap();
-
-//     // You can use handle to change logger config at runtime
-//     let handle = log4rs::init_config(config).unwrap();
-// }
 
 
 pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<(String,String)>) -> Arc<Mutex<HashMap<String,String>>> {    
