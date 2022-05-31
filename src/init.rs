@@ -158,7 +158,7 @@ pub fn enable_logging()  {
     let log_line_pattern = "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}";
     let trigger_size = byte_unit::n_mb_bytes!(30) as u64;
     let trigger = Box::new(SizeTrigger::new(trigger_size));    
-    let roller_pattern = "/var/log/mslog/log_{}.gz";
+    let roller_pattern = "/var/siem-db-connector/log/log_{}.gz";
     let roller_count = 5;
     let roller_base = 1;
     let roller = Box::new(
@@ -170,7 +170,7 @@ pub fn enable_logging()  {
     let compound_policy = Box::new(CompoundPolicy::new(trigger, roller));    
     let logfile = RollingFileAppender::builder()
         .encoder(Box::new(PatternEncoder::new(log_line_pattern)))
-        .build("/var/log/mslog/log", compound_policy)
+        .build("/var/siem-db-connector/log/log", compound_policy)
         .unwrap();
 
     // Log Trace level output to file where trace is the default level
@@ -216,7 +216,7 @@ pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<
         Ok(data) => db_track_change = serde_json::from_str(&data).log("Can not deserialize db_track_change data received from partner"),        
         Err(e) => {
             log::warn!("Could not connect to '{}' as partner to load db_track_change, OE: {:?}", partner_address, e);
-            match std::fs::read_to_string("/var/log/mslog/db_track_change.json") {
+            match std::fs::read_to_string("/var/siem-db-connector/db_track_change.json") {
                 Ok(mut data) => {
                     if data=="" {
                         data="{}".to_owned();
@@ -238,7 +238,7 @@ pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<
                     }
                 }
                 Err(e) => {
-                    fatal!("Error in reading file content /var/log/mslog/db_track_change.json, OE:{}",e);                    
+                    fatal!("Error in reading file content /var/siem-db-connector/db_track_change.json, OE:{}",e);                    
                 }
             }
         }

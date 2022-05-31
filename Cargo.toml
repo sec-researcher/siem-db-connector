@@ -1,9 +1,9 @@
 [package]
 name = "siem-db-connector"
 version = "0.1.0"
-edition = "2022"
+edition = "2021"
 license = "Apache License 2.0"
-description="Reading SQL database data and forward it as an event on UDP socket. "
+description="Reading SQL database data and forward it as an event on UDP socket."
 
 
 [features]

@@ -23,7 +23,7 @@ pub async fn sync_db_change(db_track_change: Arc<Mutex<HashMap<String,String>>>,
         if data!=new_data {
             log::info!("db_track_change config sync started!");
             data = new_data;
-            std::fs::write("/var/log/mslog/db_track_change.json", &data).log_or("Unable to write to /var/log/mslog/db_track_change.json in sync_db_change", ());            
+            std::fs::write("/var/siem-db-connector/db_track_change.json", &data).log_or("Unable to write to /var/siem-db-connector/db_track_change.json in sync_db_change", ());            
             super::com::send_data(&peer_addr, &data,"***CHT***","***END***").await.log_or("Error in sending new config to partner.", true);
         }
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;

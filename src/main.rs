@@ -21,17 +21,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     init::enable_logging();
     use sha2::{Sha256, Digest};
     let mut hasher = Sha256::new();
-    let config_text= std::fs::read_to_string("/etc/mslog.toml").log("Can not read file").parse::<String>().log("Error in parsing");
-    let config: ConfigData = toml::from_str(&config_text).log("/etc/mslog.toml syntax error.");
+    let config_text= std::fs::read_to_string("/var/siem-db-connector/config.toml").log("Can not read file").parse::<String>().log("Error in parsing");
+    let config: ConfigData = toml::from_str(&config_text).log("/var/siem-db-connector/config.toml syntax error.");
 
-    use validator::{Validate, ValidationError};
+    use validator::{Validate};
     match config.validate() {
         Ok(_) => (),
         Err(e) => { prelude::fatal!("Error: {}",e); () }
     }
     let all_log_sources_name = config.get_all_logsource_name();
     let log_sources =  LogSources { log_sources: config.log_sources};
-    let log_sources_text = toml::to_string(&log_sources).log("/etc/mslog.toml syntax error.");
+    let log_sources_text = toml::to_string(&log_sources).log("/var/siem-db-connector/config.toml syntax error.");
     hasher.update(log_sources_text.as_bytes());
     let config_hash = format!("{:x}",hasher.finalize());
     let state;
