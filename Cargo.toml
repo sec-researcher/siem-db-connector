@@ -1,15 +1,9 @@
-#Compile command: cargo build --release --target=x86_64-unknown-linux-musl --features vendored
-#cargo run --release --features=async_rotation -- 1
 [package]
-name = "mssql"
+name = "siem-db-connector"
 version = "0.1.0"
-edition = "2018"
-license = "GPL"
-description="test"
-
-[package.metadata.generate-rpm]
-package-name = "mssql"
-assets = [{source="target/release/mssql" ,dest="/usr/bin/mssql", mode="755", config=true, doc=false} ]
+edition = "2022"
+license = "Apache License 2.0"
+description="Reading SQL database data and forward it as an event on UDP socket. "
 
 
 [features]

@@ -5,8 +5,7 @@ use parking_lot::Mutex;
 use log::{LevelFilter};
 use log4rs::{
     config::Config,
-    append::console::{ConsoleAppender, Target},
-    append::file::FileAppender,
+    append::console::{ConsoleAppender, Target},    
     config::{Appender, Root},
     encode::json::JsonEncoder,
     filter::threshold::ThresholdFilter,
@@ -126,7 +125,7 @@ pub fn init(app_socket: String,state:Arc<Mutex<State>>)
             let mut response = String::new();
             use std::io::prelude::*; //Allow us to read and write from Unix sockets.
             //if let Some(response);
-            if let Ok(i) = stream.read_to_string(&mut response) {
+            if let Ok(_i) = stream.read_to_string(&mut response) {
                 println!("{}", response);
             }
             
@@ -146,16 +145,15 @@ pub fn enable_logging()  {
     use log4rs::append::rolling_file::policy::compound::{ roll::fixed_window::FixedWindowRoller, trigger::size::SizeTrigger };
     use log4rs::append::rolling_file::RollingFileAppender;
     use log4rs::encode::pattern::PatternEncoder;
-    let level = log::LevelFilter::Info;
-    let file_path = "/var/log/mslog/log";
+    let level = log::LevelFilter::Info;    
     // Build a stderr logger.
     let stderr = ConsoleAppender::builder().encoder(Box::new(JsonEncoder::new())).target(Target::Stderr).build();
     // JSON log format
-    let logfile = FileAppender::builder()
-        // Pattern: https://docs.rs/log4rs/*/log4rs/encode/pattern/index.html
-        .encoder(Box::new(JsonEncoder::new()))
-        .build(file_path)
-        .expect("Error in createing log4rs FileAppender");
+    // let logfile = FileAppender::builder()
+    //     // Pattern: https://docs.rs/log4rs/*/log4rs/encode/pattern/index.html
+    //     .encoder(Box::new(JsonEncoder::new()))
+    //     .build(file_path)
+    //     .expect("Error in createing log4rs FileAppender");
     
     let log_line_pattern = "{d(%Y-%m-%d %H:%M:%S)} | {({l}):5.5} | {f}:{L} — {m}{n}";
     let trigger_size = byte_unit::n_mb_bytes!(30) as u64;
@@ -208,7 +206,7 @@ pub fn enable_logging()  {
 
 pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<(String,String)>) -> Arc<Mutex<HashMap<String,String>>> {    
     use tokio::{ time::{self, Duration}};
-    let mut db_track_change:HashMap<String,String> = HashMap::new();
+    let mut db_track_change:HashMap<String,String>;
 
     match time::timeout(Duration::from_secs(2), 
         super::com::send_data_get_response(partner_address, "init_db_track_change", "", "")).await.unwrap_or(
@@ -250,8 +248,7 @@ pub async fn load_db_track_change(partner_address:&str,all_log_sources_name:Vec<
 
 async fn unix_socket_listener(app_socket: String,state:Arc<Mutex<State>>) {
     //use std::os::unix::net::UnixListener;
-    use tokio::net::UnixListener;
-    use std::io::prelude::*; //Allow us to read and write from Unix sockets.    
+    use tokio::net::UnixListener;    
     if std::path::Path::new(&app_socket).exists() {
         std::fs::remove_file(&app_socket).log("There is a file in path specified by config.app_socket, this process can not delete it");        
     }

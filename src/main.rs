@@ -72,16 +72,3 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config_hash.to_owned(), log_sources_text.clone(), Arc::clone(&db_track_change)));
     }
 }
-
-
-
-//hasher.update(b"hello world");
-    //let result = hasher.finalize();
-    //println!("{:x}", result);
- 
-    //Reading configuration and parse it
-
-
-//println!("call ./app listening_ip:listening_port remote_ip:remote_port");
-    //let args: Vec<String> = env::args().collect();    
-    //let partner = args[2].to_owned();
