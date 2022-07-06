@@ -56,3 +56,5 @@ lazy_static = "1.4.0"
 # x86_64-unknown-linux-musl using the "vendored" feature below
 openssl-sys = "*"
 
+#CSV writing
+csv = "1.1.6"

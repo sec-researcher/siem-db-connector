@@ -16,6 +16,8 @@ counter_field = "id"
 counter_default_value = "0"
 log_server = "127.0.0.1:10200"
 pause_duration = 2000
+log_mode="Both"
+path="/tmp/test.csv"
 
 [[log_sources]]
 name="amir"
