@@ -1,5 +1,5 @@
 # siem-db-connector
-Reading SQL database data and forwarding it as an event on UDP socket.
+Reading SQL database(Currently just MsSql) data and forwarding it as an event on UDP socket.
 This app is able to run in two different mode(Master&Slave).
 Master node will try to query the database according to config.toml specification.
 Another agent can be run on different node in slave mode. slave node at first try to find it's master and sync it's config by master.
