@@ -48,7 +48,6 @@ pub struct ConfigData {
     pub ping_duration: u64, //In mili second
     #[validate(regex = "MULTI_IP_PORT_REG")]
     pub log_server: String,
-    psk: String,
     #[validate]
     pub log_sources: Vec<LogSource>,
     #[validate]

@@ -21,9 +21,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     use sha2::{Digest, Sha256};
     let mut hasher = Sha256::new();
     let config_text = std::fs::read_to_string("/var/siem-db-connector/config.toml")
-        .log_and_exit("Can not read file")
+        .log_and_exit("Can not read /var/siem-db-connector/config.toml")
         .parse::<String>()
-        .log_and_exit("Error in parsing");
+        .log_and_exit("Error in parsing /var/siem-db-connector/config.toml");
     let config: ConfigData = init::load_config(&config_text); //toml::from_str(&config_text).log("/var/siem-db-connector/config.toml syntax error.");
 
     use validator::Validate;

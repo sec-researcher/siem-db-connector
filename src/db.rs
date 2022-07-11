@@ -181,7 +181,7 @@ pub async fn call_db(
                                                 else {
                                                     csv_handler = std::fs::OpenOptions::new()
                                                         .write(true)
-                                                        .create(true)
+                                                        .truncate(true)                                                        
                                                         .open(path);
                                                     let mut temp_buffer = vec!(csv_headers);
                                                     temp_buffer.append(&mut buffer);
@@ -199,7 +199,7 @@ pub async fn call_db(
 
                                                     },
                                                     Err(e) => {
-                                                        log::error!("Can not create handler for csv writet, OE: {}", e)                                            
+                                                        log::error!("Can not create handler for csv writer, OE: {}", e)                                            
                                                     }
                                                 }
                                                 i+=1;                                                
@@ -224,7 +224,7 @@ pub async fn call_db(
                     }
                 }
                 Err(e) => log::error!(
-                    "Error in connectimg to {}({}), OE: {}",
+                    "Error in connecting to {}({}), OE: {}",
                     log_source_config.name,
                     log_source_config.addr,
                     e
