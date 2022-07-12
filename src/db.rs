@@ -77,163 +77,180 @@ pub async fn call_query(
 }
 
 pub async fn call_db(
-    state: Arc<Mutex<State>>,
-    log_source_config: LogSource,
-    db_track_change: Arc<Mutex<HashMap<String, String>>>,
-    mut log_server: String,
-) {
-    log_server = log_source_config.log_server.unwrap_or(log_server);
-    let log_servers = log_server.split(",").collect::<Vec<&str>>();
-    log::warn!("Call DB started for {}", log_source_config.name);
-    let pause_duration =
-        std::time::Duration::from_millis(log_source_config.pause_duration.unwrap_or(2000));
-    let mut counter;
-    let mut connection_wait;
+    org_state: Arc<Mutex<State>>,
+    org_log_source_config: LogSource,
+    org_db_track_change: Arc<Mutex<HashMap<String, String>>>,
+    org_log_server: String,
+) {    
     loop {
-        connection_wait = true; //Prevent from infinite loop
-        let before_connection = Instant::now();
-        if *state.lock() != State::Slave {
-            connection_wait = true;
-            match create_sql_con(
-                &log_source_config.username,
-                &log_source_config.pass,
-                &log_source_config.addr,
-                log_source_config.port,
-            )
-            .await
-            {
-                Ok(mut client) => {
-                    log::warn!(
-                        "successfully connect and Auth to {}",
-                        log_source_config.name
-                    );
-                    let sockets = super::com::create_udp_sockets_concurrently(&log_servers).await;
-                    if sockets.len() > 0 {
-                        log::warn!("successfully connected to log server at {}", log_server);
-                        while *state.lock() != State::Slave {
-                            let before_query = Instant::now();
-                            counter = db_track_change
-                                .lock()
-                                .get(&log_source_config.name)
-                                .unwrap_or(&"".to_owned())
-                                .to_string();
-                            match call_query(client, &log_source_config.query, counter, 0).await {
-                                Ok((rows, mut i, returned_client)) => {
-                                    client = returned_client;
-                                    let mut buffer:Vec<Vec<String>> = Vec::new();
-                                    let rows_len = rows.len();
-                                    for item in rows {
-                                        let mut csv_headers = vec!();
-                                        if csv_headers.len()==0 {
-                                            for col in item.columns() {
-                                                csv_headers.push(col.name().to_owned())
-                                            }
-                                        } 
-                                        let log;
-                                        if log_source_config.counter_field != Option::None
-                                            && log_source_config.hide_counter != Option::None
-                                        {
-                                            log = format!(
-                                                "{}\n",
-                                                item.get_row_str(
-                                                    &log_source_config
-                                                        .counter_field
-                                                        .clone()
-                                                        .unwrap()
-                                                )
-                                            );
-                                        } else {
-                                            log = format!("{}\n", item.get_row_str(""));
-                                        }
-                                        if log_source_config.log_mode==Some(LogMode::Both) || log_source_config.log_mode==Some(LogMode::Net) {
-                                            for sock in &sockets {
-                                                match sock.send(log.as_bytes()).await {
-                                                    Ok(_) => {
-                                                        let counter = item.get_field_str(
-                                                            log_source_config.counter_field.clone(),
+        let log_source_config = org_log_source_config.clone();
+        let mut log_server = org_log_server.clone();
+        let state = Arc::clone(&org_state);
+        let db_track_change = Arc::clone(&org_db_track_change);
+
+
+        let res = tokio::spawn(
+            async move  {
+                log_server = log_source_config.log_server.unwrap_or(log_server);
+                let log_servers = log_server.split(",").collect::<Vec<&str>>();
+                log::warn!("Call DB started for {}", log_source_config.name);
+                let pause_duration =
+                    std::time::Duration::from_millis(log_source_config.pause_duration.unwrap_or(2000));
+                let mut counter;
+                let mut connection_wait;
+                loop {
+                    connection_wait = true; //Prevent from infinite loop
+                    let before_connection = Instant::now();
+                    if *state.lock() != State::Slave {
+                        connection_wait = true;
+                        match create_sql_con(
+                            &log_source_config.username,
+                            &log_source_config.pass,
+                            &log_source_config.addr,
+                            log_source_config.port,
+                        )
+                        .await
+                        {
+                            Ok(mut client) => {
+                                log::warn!(
+                                    "successfully connect and Auth to {}",
+                                    log_source_config.name
+                                );
+                                let sockets = super::com::create_udp_sockets_concurrently(&log_servers).await;
+                                if sockets.len() > 0 {
+                                    log::warn!("successfully connected to log server at {}", log_server);
+                                    while *state.lock() != State::Slave {
+                                        let before_query = Instant::now();
+                                        counter = db_track_change
+                                            .lock()
+                                            .get(&log_source_config.name)
+                                            .unwrap_or(&"".to_owned())
+                                            .to_string();
+                                        match call_query(client, &log_source_config.query, counter, 0).await {
+                                            Ok((rows, mut i, returned_client)) => {
+                                                client = returned_client;
+                                                let mut buffer:Vec<Vec<String>> = Vec::new();
+                                                let rows_len = rows.len();
+                                                for item in rows {
+                                                    let mut csv_headers = vec!();
+                                                    if csv_headers.len()==0 {
+                                                        for col in item.columns() {
+                                                            csv_headers.push(col.name().to_owned())
+                                                        }
+                                                    } 
+                                                    let log;
+                                                    if log_source_config.counter_field != Option::None
+                                                        && log_source_config.hide_counter != Option::None
+                                                    {
+                                                        log = format!(
+                                                            "{}\n",
+                                                            item.get_row_str(
+                                                                &log_source_config
+                                                                    .counter_field
+                                                                    .clone()
+                                                                    .unwrap()
+                                                            )
                                                         );
-                                                        if counter != "" {
-                                                            match db_track_change.lock().get_mut(&log_source_config.name) {
-                                                                Some(track_change) => *track_change = counter,
-                                                                None => log::error!("Can not find {} key in db_track_change.", log_source_config.name)
+                                                    } else {
+                                                        log = format!("{}\n", item.get_row_str(""));
+                                                    }
+                                                    if log_source_config.log_mode==Some(LogMode::Both) || log_source_config.log_mode==Some(LogMode::Net) {
+                                                        for sock in &sockets {
+                                                            match sock.send(log.as_bytes()).await {
+                                                                Ok(_) => {
+                                                                    let counter = item.get_field_str(
+                                                                        log_source_config.counter_field.clone(),
+                                                                    );
+                                                                    if counter != "" {
+                                                                        match db_track_change.lock().get_mut(&log_source_config.name) {
+                                                                            Some(track_change) => *track_change = counter,
+                                                                            None => log::error!("Can not find {} key in db_track_change.", log_source_config.name)
+                                                                        }
+                                                                    }
+                                                                    log::debug!("{}", log)
+                                                                }
+                                                                Err(e) => {
+                                                                    log::error!("Error in sending log, OE: {}", e)
+                                                                }
                                                             }
                                                         }
-                                                        log::debug!("{}", log)
                                                     }
-                                                    Err(e) => {
-                                                        log::error!("Error in sending log, OE: {}", e)
-                                                    }
-                                                }
+                                                    
+                                                    
+                                                    if let Some(path)=&log_source_config.path {
+                                                        buffer.push(item.get_row_as_array_wothout_fields_name(""));
+                                                        if buffer.len()==1000 || (i*1000)+buffer.len()==rows_len {
+                                                            let csv_handler;
+                                                            if i>0 {
+                                                                csv_handler = std::fs::OpenOptions::new()
+                                                                    .write(true)
+                                                                    .append(true)
+                                                                    .open(path);
+                                                            }
+                                                            else {
+                                                                csv_handler = std::fs::OpenOptions::new()
+                                                                    .write(true)
+                                                                    .truncate(true)                                                        
+                                                                    .open(path);
+                                                                let mut temp_buffer = vec!(csv_headers);
+                                                                temp_buffer.append(&mut buffer);
+                                                                buffer = temp_buffer;
+                                                            }                                                
+                                                            
+                                                            match csv_handler {
+                                                                Ok(csv_handler) => {
+                                                                    let mut csv_writer = csv::Writer::from_writer(csv_handler);
+                                                                    for record in buffer {
+                                                                        csv_writer.write_record(record).log("Error in adding record to csv writer");
+                                                                    }
+                                                                    csv_writer.flush().log("Error in flushing csv writer");
+                                                                    buffer = vec!();
+            
+                                                                },
+                                                                Err(e) => {
+                                                                    log::error!("Can not create handler for csv writer, OE: {}", e)                                            
+                                                                }
+                                                            }
+                                                            i+=1;                                                
+                                                        }
+                                                    }                                       
+                                                    
+                                                }                                    
+                                            }
+                                            Err(e) => {
+                                                log::error!(
+                                                    "Error on calling query&fetching result, OE: {}",
+                                                    e
+                                                );
+                                                break;
                                             }
                                         }
-                                        
-                                        
-                                        if let Some(path)=&log_source_config.path {
-                                            buffer.push(item.get_row_as_array_wothout_fields_name(""));
-                                            if buffer.len()==1000 || (i*1000)+buffer.len()==rows_len {
-                                                let csv_handler;
-                                                if i>0 {
-                                                    csv_handler = std::fs::OpenOptions::new()
-                                                        .write(true)
-                                                        .append(true)
-                                                        .open(path);
-                                                }
-                                                else {
-                                                    csv_handler = std::fs::OpenOptions::new()
-                                                        .write(true)
-                                                        .truncate(true)                                                        
-                                                        .open(path);
-                                                    let mut temp_buffer = vec!(csv_headers);
-                                                    temp_buffer.append(&mut buffer);
-                                                    buffer = temp_buffer;
-                                                }                                                
-                                                
-                                                match csv_handler {
-                                                    Ok(csv_handler) => {
-                                                        let mut csv_writer = csv::Writer::from_writer(csv_handler);
-                                                        for record in buffer {
-                                                            csv_writer.write_record(record).log("Error in adding record to csv writer");
-                                                        }
-                                                        csv_writer.flush().log("Error in flushing csv writer");
-                                                        buffer = vec!();
-
-                                                    },
-                                                    Err(e) => {
-                                                        log::error!("Can not create handler for csv writer, OE: {}", e)                                            
-                                                    }
-                                                }
-                                                i+=1;                                                
-                                            }
-                                        }                                       
-                                        
-                                    }                                    
-                                }
-                                Err(e) => {
-                                    log::error!(
-                                        "Error on calling query&fetching result, OE: {}",
-                                        e
-                                    );
-                                    break;
+                                        pause(pause_duration, before_query.elapsed()).await;
+                                        connection_wait = false;
+                                    }
+                                } else {
+                                    //Err(e) => log::error!("Error in connecting to log server: {}, OE: {}", log_server, e)
                                 }
                             }
-                            pause(pause_duration, before_query.elapsed()).await;
-                            connection_wait = false;
+                            Err(e) => log::error!(
+                                "Error in connecting to {}({}), OE: {}",
+                                log_source_config.name,
+                                log_source_config.addr,
+                                e
+                            ),
                         }
-                    } else {
-                        //Err(e) => log::error!("Error in connecting to log server: {}, OE: {}", log_server, e)
+                    }
+                    if connection_wait {
+                        //Prevent from two times waiting in one cycle
+                        pause(pause_duration, before_connection.elapsed()).await;
                     }
                 }
-                Err(e) => log::error!(
-                    "Error in connecting to {}({}), OE: {}",
-                    log_source_config.name,
-                    log_source_config.addr,
-                    e
-                ),
             }
-        }
-        if connection_wait {
-            //Prevent from two times waiting in one cycle
-            pause(pause_duration, before_connection.elapsed()).await;
+        ).await;
+        match res {
+            Ok(_) => { log::warn!("This log should never be generated, tokio thread for {} ended successfully", org_log_source_config.name) },
+            Err(err) if err.is_panic() => { log::error!("Thread {} paniced, so the thread will restart, OE: {}", org_log_source_config.name, err) },
+            Err(err) => { log::error!("An unexpected error happened for thread {}, OE:{}", org_log_source_config.name, err) },
         }
     }
 }
