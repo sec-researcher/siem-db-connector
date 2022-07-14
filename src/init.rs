@@ -121,7 +121,8 @@ pub struct LogSource {
     pub log_server: Option<String>,
     pub pause_duration: Option<u64>, //In mili second
     pub log_mode: Option<LogMode>,
-    pub path: Option<String>
+    pub path: Option<String>,
+    pub set_current_time: Option<bool>
 }
 
 impl LogSource {

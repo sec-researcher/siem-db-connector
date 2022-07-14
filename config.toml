@@ -18,6 +18,7 @@ log_server = "127.0.0.1:10200"
 pause_duration = 2000
 log_mode="Both"
 path="/tmp/test.csv"
+set_current_time=1
 
 [[log_sources]]
 name="amir"
@@ -28,7 +29,7 @@ pass= "123"
 query= "select * FROM [test].[dbo].[family]"
 counter_field = "id"
 counter_default_value = "1"
-
+set_current_time=0
 
 [[comp]]
 name="comp1"
@@ -40,6 +41,7 @@ port= 1433
 username= "test"
 pass= "123"
 query= "SELECT title as log_field_name  FROM [test].[dbo].[cat] where id=1"
+set_current_time=1
 
 [[comp.log_sources]]
 name="compq2"
@@ -51,3 +53,4 @@ query= "SELECT name,id FROM [test].[dbo].[identity] where id=1"
 counter_field = "id"
 counter_default_value = "1"
 hide_counter=false
+set_current_time=0

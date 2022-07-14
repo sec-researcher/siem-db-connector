@@ -7,6 +7,7 @@ use openssl_sys::ERR_lib_error_string;
 use parking_lot::Mutex;
 use serde_json;
 use std::collections::HashMap;
+use std::f32::consts::E;
 use std::sync::Arc;
 use std::time::Instant;
 use tiberius::{AuthMethod, Client, Config};
@@ -137,13 +138,18 @@ pub async fn call_db(
                                                         for col in item.columns() {
                                                             csv_headers.push(col.name().to_owned())
                                                         }
-                                                    } 
-                                                    let log;
+                                                    }
+                                                    let mut log ="".to_owned();
+                                                    if log_source_config.set_current_time!=None {
+                                                        log = format!("date={},",chrono::offset::Local::now());
+                                                    }
+                                                    
+                                                    
                                                     if log_source_config.counter_field != Option::None
                                                         && log_source_config.hide_counter != Option::None
                                                     {
                                                         log = format!(
-                                                            "{}\n",
+                                                            "{}{}\n",log,
                                                             item.get_row_str(
                                                                 &log_source_config
                                                                     .counter_field
@@ -152,12 +158,12 @@ pub async fn call_db(
                                                             )
                                                         );
                                                     } else {
-                                                        log = format!("{}\n", item.get_row_str(""));
+                                                        log = format!("{}{}\n",log, item.get_row_str(""));
                                                     }
                                                     if log_source_config.log_mode==Some(LogMode::Both) || log_source_config.log_mode==Some(LogMode::Net) {
                                                         for sock in &sockets {
                                                             match sock.send(log.as_bytes()).await {
-                                                                Ok(_) => {
+                                                                Ok(_) if log_source_config.counter_field!=None => { //If counter_field is set then go for updating db_track_change
                                                                     let counter = item.get_field_str(
                                                                         log_source_config.counter_field.clone(),
                                                                     );
@@ -169,6 +175,7 @@ pub async fn call_db(
                                                                     }
                                                                     log::debug!("{}", log)
                                                                 }
+                                                                Ok(_) =>(), //Do nothing
                                                                 Err(e) => {
                                                                     log::error!("Error in sending log, OE: {}", e)
                                                                 }
