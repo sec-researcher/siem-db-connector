@@ -141,7 +141,7 @@ pub async fn call_db(
                                                     }
                                                     let mut log ="".to_owned();
                                                     if log_source_config.set_current_time!=None {
-                                                        log = format!("date={},",chrono::offset::Local::now());
+                                                        log = format!("date=\"{}\",",chrono::offset::Local::now());
                                                     }
                                                     
                                                     
