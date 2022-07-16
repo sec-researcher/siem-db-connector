@@ -12,83 +12,86 @@ Sample config.toml configuration is available in this repo. This app is able to 
 ## There are 3 types of configuration object in this app:
 
 ### 1.General config
+Indicate IP address and listening port for the app, The app use this port to communicate with its partner
 ```
 listening_addr = "10.235.20.1:8080"
 ```
-Indicate IP address and listening port for the app, The app use this port to communicate with its partner
+IP address and listening port of the partner
 ```
 peer_addr= "10.235.20.20:8080"
 ```
-IP address and listening port of the partner
+Unix socket path to prevent running multiple instance
 ```
 app_socket="/tmp/db"
 ```
-Unix socket path to prevent running multiple instance
+Pause time between agent communication, and config sync
 ```
 ping_duration = 2000
 ```
-Pause time between agent communication, and config sync
+Default app role it could be {master, slave}
 ```
 default_role = "master"
 ```
-Default app role it could be {master, slave}
+If the user did not specify log server per log_source the app use this address as default log server
 ```
 log_server = "127.0.0.1:10100"
 ```
-If the user did not specify log server per log_source the app use this address as default log server
+
 
 ### 2.[log_sources]
+Log source name
 ```
 name="test"
 ```
-Log source name
+Mssql server ip address
 ```
 addr = "192.168.77.129"
 ```
-Mssql server ip address
+Mssql server port number
 ```
 port= 1433
 ```
-Mssql server port number
+Username with proper access to run query
 ```
 username= "test"
 ```
-Username with proper access to run query
+Password
 ```
 pass= "123"
 ```
-Password
-query= "select * FROM [test].[dbo].[identity] where id>??"
-```
 The query that should run on DB, with notations like id>?? we can aware the app for using this field as counter
 ```
-counter_field = "id"
+query= "select * FROM [test].[dbo].[identity] where id>??"
 ```
 Counter field name
 ```
-counter_default_value="0"
+counter_field = "id"
 ```
 For first time the app use this value as counter default value, after that the new value will be store in db_track_change.json
 ```
-log_server="127.0.0.1:10200,127.0.0.1:10201"
+counter_default_value="0"
 ```
 Any row readed from DB will be sent on udp to this list, it's possible to define multiple server by comma(,) separation
 ```
-pause_duration = 2000
+log_server="127.0.0.1:10200,127.0.0.1:10201"
 ```
 Defining pause time between query call
 ```
-log_mode="Both"
+pause_duration = 2000
 ```
 Log mode can have these values {Both,Net,File} Net just sent log over udp, File store recieved log as csv on specified path in path property
 ```
-path="/tmp/test.csv"
+log_mode="Both"
 ```
 Specify the location of csv file for saving log, this propert only works if log_mode set to File or Both.
 ```
-set_current_time=1
+path="/tmp/test.csv"
 ```
 Add a date field at the begenning of each event by the value of current local time&date
+```
+set_current_time=1
+```
+
 
 ### 3.[[comp]]
 ```
