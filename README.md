@@ -23,42 +23,85 @@ IP address and listening port of the partner
 ```
 app_socket="/tmp/db"
 ```
-unix socket path to prevent running multiple instance
+Unix socket path to prevent running multiple instance
 ```
 ping_duration = 2000
 ```
-pause time between agent communication, and config sync
+Pause time between agent communication, and config sync
 ```
 default_role = "master"
 ```
-default app role it could be {master, slave}
+Default app role it could be {master, slave}
 ```
 log_server = "127.0.0.1:10100"
 ```
-if the user did not specify log server per log_source the app use this address as default log server
-```
+If the user did not specify log server per log_source the app use this address as default log server
+
 ### 2.[log_sources]
 ```
-name="test"             #log source name
-addr = "192.168.77.129" #mssql server ip address
-port= 1433              #mssql server port number
-username= "test"        #username with proper access to run query
-pass= "123"             #password
-query= "select * FROM [test].[dbo].[identity] where id>??" #The query that should run on DB, with notations like id>?? we can aware the app for using this field as counter
-counter_field = "id"     #Counter field name
-counter_default_value="0"    #For first time the app use this value as counter default value, after that the new value will be store in db_track_change.json
-log_server="127.0.0.1:10200,127.0.0.1:10201" #Any row readed from DB will be sent on udp to this list, it's possible to define multiple server by comma(,) separation
-pause_duration = 2000   #defining pause time between query call
-log_mode="Both"         #log mode can have these values {Both,Net,File} Net just sent log over udp, File store recieved log as csv on specified path in path property
-path="/tmp/test.csv"    #specify the location of csv file for saving log, this propert only works if log_mode set to File or Both.
-set_current_time=1      #add a date field at the begenning of each event by the value of current local time&date
+name="test"
 ```
+Log source name
+```
+addr = "192.168.77.129"
+```
+Mssql server ip address
+```
+port= 1433
+```
+Mssql server port number
+```
+username= "test"
+```
+Username with proper access to run query
+```
+pass= "123"
+```
+Password
+query= "select * FROM [test].[dbo].[identity] where id>??"
+```
+The query that should run on DB, with notations like id>?? we can aware the app for using this field as counter
+```
+counter_field = "id"
+```
+Counter field name
+```
+counter_default_value="0"
+```
+For first time the app use this value as counter default value, after that the new value will be store in db_track_change.json
+```
+log_server="127.0.0.1:10200,127.0.0.1:10201"
+```
+Any row readed from DB will be sent on udp to this list, it's possible to define multiple server by comma(,) separation
+```
+pause_duration = 2000
+```
+Defining pause time between query call
+```
+log_mode="Both"
+```
+Log mode can have these values {Both,Net,File} Net just sent log over udp, File store recieved log as csv on specified path in path property
+```
+path="/tmp/test.csv"
+```
+Specify the location of csv file for saving log, this propert only works if log_mode set to File or Both.
+```
+set_current_time=1
+```
+Add a date field at the begenning of each event by the value of current local time&date
+
 ### 3.[[comp]]
 ```
-name="comp1"                  #comp stands for complicated, this property define the name of complicated query this name should be unique
-result="compq1, cat=compq2,"  #define result format, comp1 will be replace with the result of [[comp.log_sources]].name="comp1" and so on
+name="comp1"
+```
+Comp stands for complicated, this property define the name of complicated query this name should be unique
+```
+result="compq1, cat=compq2,"
+```
+Define result format, comp1 will be replace with the result of [[comp.log_sources]].name="comp1" and so on
 
-[[comp.log_sources]]          #this is a log_sources object, full description of properties is available at above(num 2).
+```
+[[comp.log_sources]]          
 name="compq1"
 addr = "192.168.77.129"
 port= 1433
@@ -67,3 +110,4 @@ pass= "123"
 query= "SELECT title as log_field_name  FROM [test].[dbo].[cat] where id=1"
 set_current_time=1
 ```
+This is a log_sources object, full description of properties is available at above(num 2).
