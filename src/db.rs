@@ -73,7 +73,13 @@ pub async fn call_query(
     let query = query.replace("??", &counter);
     println!("{}", query);
     //let mut client = client.lock();
-    let stream = client.query(&query, &[]).await?;
+    use tiberius::error::{Error, IoErrorKind, };
+    let stream = time::timeout(
+        Duration::from_secs(60),
+        client.query(&query, &[]),
+    )
+    .await
+    .unwrap_or(Err(Error::Io { kind: IoErrorKind::TimedOut, message: "Running sql query timed out".to_string() } ))?;
     return Ok((stream.into_first_result().await?, i, client));
 }
 
@@ -239,12 +245,7 @@ pub async fn call_db(
                                     //Err(e) => log::error!("Error in connecting to log server: {}, OE: {}", log_server, e)
                                 }
                             }
-                            Err(e) => log::error!(
-                                "Error in connecting to {}({}), OE: {}",
-                                log_source_config.name,
-                                log_source_config.addr,
-                                e
-                            ),
+                            Err(e) => log::error!("Error in connecting to {}({}), OE: {}",log_source_config.name,log_source_config.addr,e),
                         }
                     }
                     if connection_wait {
