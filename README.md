@@ -1,4 +1,4 @@
-### siem-db-connector
+# siem-db-connector
 Reading SQL database(Currently just MsSql) data and forwarding it as an event on UDP socket. This app is able to run in two different mode(Master&Slave). Master node will try to query the database according to config.toml specification. Another agent can be run on different node in slave mode. slave node at first try to find it's master and sync it's config by master. so any change in config should just be done on the master node.
 
 If for any reason master node goes down, slave node will go to master mode and continue the operation until master node come back. These three files should be created for proper operation:
@@ -11,7 +11,7 @@ Sample config.toml configuration is available in this repo. This app is able to 
 
 ## There are 3 types of configuration object in this app:
 
-# 1.General config
+### 1.General config
 ```
 listening_addr = "10.235.20.1:8080" #indicate IP address and listening port for the app, The app use this port to communicate with its partner
 peer_addr= "10.235.20.20:8080"      #IP address and listening port of the partner
@@ -20,7 +20,7 @@ ping_duration = 2000                #pause time between agent communication, and
 default_role = "master"             #default app role it could be {master, slave}
 log_server = "127.0.0.1:10100"      #if the user did not specify log server per log_source the app use this address as default log server
 ```
-# 2.[log_sources]
+### 2.[log_sources]
 ```
 name="test"             #log source name
 addr = "192.168.77.129" #mssql server ip address
@@ -36,7 +36,7 @@ log_mode="Both"         #log mode can have these values {Both,Net,File} Net just
 path="/tmp/test.csv"    #specify the location of csv file for saving log, this propert only works if log_mode set to File or Both.
 set_current_time=1      #add a date field at the begenning of each event by the value of current local time&date
 ```
-# 3.[[comp]]
+### 3.[[comp]]
 ```
 name="comp1"                  #comp stands for complicated, this property define the name of complicated query this name should be unique
 result="compq1, cat=compq2,"  #define result format, comp1 will be replace with the result of [[comp.log_sources]].name="comp1" and so on
