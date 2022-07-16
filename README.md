@@ -15,7 +15,8 @@ Sample config.toml configuration is available in this repo. This app is able to 
 ```
 listening_addr = "10.235.20.1:8080"
 ```
-#indicate IP address and listening port for the app, The app use this port to communicate with its partner
+Indicate IP address and listening port for the app, The app use this port to communicate with its partner
+```
 peer_addr= "10.235.20.20:8080"      #IP address and listening port of the partner
 app_socket="/tmp/db"                #unix socket path to prevent running multiple instance
 ping_duration = 2000                #pause time between agent communication, and config sync
