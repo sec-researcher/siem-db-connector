@@ -103,6 +103,7 @@ Define result format, comp1 will be replace with the result of [[comp.log_source
 result="compq1, cat=compq2,"
 ```
 This is a log_sources object, full description of properties is available at above(num 2).
+There is only 1 difference, in complicated queries log_sources the app just use first returned row to generated final result even if the query return more than 1 row.
 ```
 [[comp.log_sources]]          
 name="compq1"
