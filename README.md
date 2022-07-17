@@ -94,15 +94,15 @@ set_current_time=1
 
 
 ### 3.[[comp]]
+Comp stands for complicated, this property define the name of complicated query this name should be unique
 ```
 name="comp1"
 ```
-Comp stands for complicated, this property define the name of complicated query this name should be unique
+Define result format, comp1 will be replace with the result of [[comp.log_sources]].name="comp1" and so on
 ```
 result="compq1, cat=compq2,"
 ```
-Define result format, comp1 will be replace with the result of [[comp.log_sources]].name="comp1" and so on
-
+This is a log_sources object, full description of properties is available at above(num 2).
 ```
 [[comp.log_sources]]          
 name="compq1"
@@ -113,4 +113,3 @@ pass= "123"
 query= "SELECT title as log_field_name  FROM [test].[dbo].[cat] where id=1"
 set_current_time=1
 ```
-This is a log_sources object, full description of properties is available at above(num 2).
