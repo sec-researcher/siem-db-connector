@@ -1,13 +1,10 @@
 use super::init::{Comp, LogSource};
-use crate::init::{LogSources, State, LogMode};
+use crate::init::{ State, LogMode};
 use crate::prelude::ResultExt;
 use crate::prelude::RowExt;
-use csv::Error;
-use openssl_sys::ERR_lib_error_string;
 use parking_lot::Mutex;
 use serde_json;
 use std::collections::HashMap;
-use std::f32::consts::E;
 use std::sync::Arc;
 use std::time::Instant;
 use tiberius::{AuthMethod, Client, Config};
@@ -133,8 +130,10 @@ pub async fn call_db(
                                             .get(&log_source_config.name)
                                             .unwrap_or(&"".to_owned())
                                             .to_string();
+                                        log::info!("call query started on {}", log_source_config.name);
                                         match call_query(client, &log_source_config.query, counter, 0).await {
                                             Ok((rows, mut i, returned_client)) => {
+                                                log::info!("call query success on {}, returned rows num: {}", log_source_config.name, rows.len());
                                                 client = returned_client;
                                                 let mut buffer:Vec<Vec<String>> = Vec::new();
                                                 let rows_len = rows.len();
@@ -149,7 +148,6 @@ pub async fn call_db(
                                                     if log_source_config.set_current_time!=None {
                                                         log = format!("date=\"{}\",",chrono::offset::Local::now());
                                                     }
-                                                    
                                                     
                                                     if log_source_config.counter_field != Option::None
                                                         && log_source_config.hide_counter != Option::None
@@ -167,6 +165,7 @@ pub async fn call_db(
                                                         log = format!("{}{}\n",log, item.get_row_str(""));
                                                     }
                                                     if log_source_config.log_mode==Some(LogMode::Both) || log_source_config.log_mode==Some(LogMode::Net) {
+                                                        log::info!("start sending log over network for query: {}", log_source_config.name);
                                                         for sock in &sockets {
                                                             match sock.send(log.as_bytes()).await {
                                                                 Ok(_) if log_source_config.counter_field!=None => { //If counter_field is set then go for updating db_track_change
@@ -203,7 +202,7 @@ pub async fn call_db(
                                                             else {
                                                                 csv_handler = std::fs::OpenOptions::new()
                                                                     .write(true)
-                                                                    .truncate(true)                                                        
+                                                                    .truncate(true)
                                                                     .open(path);
                                                                 let mut temp_buffer = vec!(csv_headers);
                                                                 temp_buffer.append(&mut buffer);
@@ -221,20 +220,16 @@ pub async fn call_db(
             
                                                                 },
                                                                 Err(e) => {
-                                                                    log::error!("Can not create handler for csv writer, OE: {}", e)                                            
+                                                                    log::error!("Can not create handler for csv writer, OE: {}", e)
                                                                 }
                                                             }
-                                                            i+=1;                                                
+                                                            i+=1;
                                                         }
-                                                    }                                       
-                                                    
+                                                    }
                                                 }                                    
                                             }
                                             Err(e) => {
-                                                log::error!(
-                                                    "Error on calling query&fetching result, OE: {}",
-                                                    e
-                                                );
+                                                log::error!("Error on calling query&fetching result, OE: {}", e);
                                                 break;
                                             }
                                         }
