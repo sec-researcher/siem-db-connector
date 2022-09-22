@@ -1,5 +1,5 @@
 //Arc mutex for thread communication
-use parking_lot::Mutex;
+use futures::lock::Mutex;
 use std::{collections::HashMap, sync::Arc};
 //Logging dependencies
 use crate::com::ComError;
@@ -12,9 +12,7 @@ use log4rs::{
     filter::threshold::ThresholdFilter,
 };
 use tokio::io::AsyncWriteExt;
-
 use super::prelude::{fatal, ResultExt};
-
 #[derive(PartialEq, Clone, Copy, Debug)]
 pub enum State {
     MasterWaiting,
@@ -22,7 +20,6 @@ pub enum State {
     Slave,
 }
 use serde_derive::{Deserialize, Serialize};
-
 use regex::Regex;
 use validator::Validate;
 lazy_static! {
@@ -334,7 +331,7 @@ async fn unix_socket_listener(app_socket: String, state: Arc<Mutex<State>>) {
     loop {
         match listener.accept().await {
             Ok((mut stream, _addr)) => {
-                let msg = format!("Agent is in {:?} mode", *state.lock());
+                let msg = format!("Agent is in {:?} mode", *state.lock().await);
                 stream
                     .write(msg.as_bytes())
                     .await

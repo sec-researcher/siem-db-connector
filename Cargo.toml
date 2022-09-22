@@ -24,7 +24,7 @@ tokio-util={ version = "*", features = ["full"] }
 futures = "0.3.21"
 bytes="*"
 crossterm = { version="*", features = ["event-stream"]  }
-parking_lot="*"
+#parking_lot="*"
 static_vcruntime = "1.5"
 #These dependencies used for parsing configuration files
 serde_derive = "*"

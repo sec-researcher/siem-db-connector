@@ -2,7 +2,7 @@ use super::init::{Comp, LogSource};
 use crate::init::{ State, LogMode};
 use crate::prelude::ResultExt;
 use crate::prelude::RowExt;
-use parking_lot::Mutex;
+use futures::lock::Mutex;
 use serde_json;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,9 +17,9 @@ pub async fn sync_db_change(
     peer_addr: String,
 ) {
     log::debug!("db_track_change run");
-    let mut data = "".to_owned();
+    let mut data = "".to_owned();    
     loop {
-        let new_data = serde_json::to_string(&*db_track_change.lock()).log_or(
+        let new_data = serde_json::to_string(&*db_track_change.lock().await).log_or(
             "Can not convert db_track_change object to string",
             "".to_string(),
         );
@@ -105,7 +105,7 @@ pub async fn call_db(
                 loop {
                     connection_wait = true; //Prevent from infinite loop
                     let before_connection = Instant::now();
-                    if *state.lock() != State::Slave {
+                    if *state.lock().await != State::Slave {
                         connection_wait = true;
                         match create_sql_con(
                             &log_source_config.username,
@@ -123,10 +123,10 @@ pub async fn call_db(
                                 let sockets = super::com::create_udp_sockets_concurrently(&log_servers).await;
                                 if sockets.len() > 0 {
                                     log::warn!("successfully connected to log server at {}", log_server);
-                                    while *state.lock() != State::Slave {
+                                    while *state.lock().await != State::Slave {
                                         let before_query = Instant::now();
                                         counter = db_track_change
-                                            .lock()
+                                            .lock().await
                                             .get(&log_source_config.name)
                                             .unwrap_or(&"".to_owned())
                                             .to_string();
@@ -164,8 +164,7 @@ pub async fn call_db(
                                                     } else {
                                                         log = format!("{}{}\n",log, item.get_row_str(""));
                                                     }
-                                                    if log_source_config.log_mode==Some(LogMode::Both) || log_source_config.log_mode==Some(LogMode::Net) {
-                                                        log::info!("start sending log over network for query: {}", log_source_config.name);
+                                                    if log_source_config.log_mode==Some(LogMode::Both) || log_source_config.log_mode==Some(LogMode::Net) {                                                        
                                                         for sock in &sockets {
                                                             match sock.send(log.as_bytes()).await {
                                                                 Ok(_) if log_source_config.counter_field!=None => { //If counter_field is set then go for updating db_track_change
@@ -173,7 +172,7 @@ pub async fn call_db(
                                                                         log_source_config.counter_field.clone(),
                                                                     );
                                                                     if counter != "" {
-                                                                        match db_track_change.lock().get_mut(&log_source_config.name) {
+                                                                        match db_track_change.lock().await.get_mut(&log_source_config.name) {
                                                                             Some(track_change) => *track_change = counter,
                                                                             None => log::error!("Can not find {} key in db_track_change.", log_source_config.name)
                                                                         }
@@ -273,7 +272,7 @@ pub async fn call_comp(
     loop {
         connection_wait = true;
         let before_connection = Instant::now();
-        if *state.lock() != State::Slave {
+        if *state.lock().await != State::Slave {
             connection_wait = true;
             let mut sql_conn_list =
                 create_sql_connection_concurrently(&comp.log_sources, &comp.name).await;
@@ -283,7 +282,7 @@ pub async fn call_comp(
                 log::warn!("Connected to log server {}", log_server);
                 if sql_conn_list.len() == comp.log_sources.len() {
                     //Make sure that connection to all server was success
-                    while *state.lock() != State::Slave {
+                    while *state.lock().await != State::Slave {
                         let before_query = Instant::now();
                         let mut track_change: HashMap<String, String> = HashMap::new();
                         let mut futures = vec![];
@@ -295,7 +294,7 @@ pub async fn call_comp(
                             let log_source = &comp.log_sources[i];
                             let client = sql_conn_list.pop().unwrap(); //Using unwrap is safe here because at the start of the loop we check that list is not empty
                             let counter = db_track_change
-                                .lock()
+                                .lock().await
                                 .get(&log_source.name)
                                 .unwrap_or(&"".to_owned())
                                 .to_string();
@@ -465,7 +464,7 @@ async fn send_comp_log(
     if send {
         //If log sent to at least one server that make db_track_change persistent.
         for item in track_change {
-            match db_track_change.lock().get_mut(&item.0) {
+            match db_track_change.lock().await.get_mut(&item.0) {
                 Some(track_change) => *track_change = item.1,
                 None => log::error!("Can not find {} key in db_track_change.", item.0),
             }

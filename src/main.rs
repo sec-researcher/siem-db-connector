@@ -2,7 +2,8 @@ extern crate static_vcruntime;
 use std::error::Error;
 use tokio::net::TcpListener;
 //Arc mutex for thread communication
-use parking_lot::Mutex;
+use futures::lock::Mutex;
+//use parking_lot::Mutex;
 use std::sync::Arc;
 //use std::env;
 use init::{ConfigData, LogSources, State};

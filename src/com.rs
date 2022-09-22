@@ -1,6 +1,6 @@
 //Arc mutex for thread communication
 use super::init::{ConfigData, LogSources, State};
-use parking_lot::Mutex;
+use futures::lock::Mutex;
 use std::collections::HashMap;
 use std::{io::Error, sync::Arc};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -108,7 +108,7 @@ pub async fn check_partner_status(
     config_hash: String,
     mut config: ConfigData,
 ) {
-    while *state.lock() == State::MasterWaiting {
+    while *state.lock().await == State::MasterWaiting {
         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
         log::info!("Waiting for an slave to connect!!");
     }
@@ -139,7 +139,7 @@ pub async fn check_partner_status(
                                 Ok(n) if n == 0 => {
                                     //0 means socket closed or timeout happend in above line
                                     log::warn!("This agent go to master mode because answer with 0 length received or connection timed out");
-                                    *state.lock() = State::Master;
+                                    *state.lock().await = State::Master;
                                 }
                                 Ok(n) => {
                                     let message = String::from_utf8(buf[..n].to_vec())
@@ -148,7 +148,7 @@ pub async fn check_partner_status(
                                         log::error!("Converting bytes to string fails in check_partner_status, so app will close current socket and open a new one");
                                         break 'write;
                                     } else if message == "I'm slave\n" {
-                                        *state.lock() = State::Master;
+                                        *state.lock().await = State::Master;
                                         log::warn!("This agent go to master mode because I'm slave message received from partner")
                                     } else {
                                         //If message!="I'm slave\n", It's I'm master+query config hash splitted by \n
@@ -198,11 +198,11 @@ pub async fn check_partner_status(
                                             }
                                         }
                                         log::warn!("This agent go to slave mode, Because other side is in master mode");
-                                        *state.lock() = State::Slave;
+                                        *state.lock().await = State::Slave;
                                     }
                                 }
                                 Err(e) => {
-                                    *state.lock() = State::Master;
+                                    *state.lock().await = State::Master;
                                     log::warn!("This agent go to master mode because failed to read from socket, OE: {}", e);
                                     break 'write; //Break the loop to make a new connection
                                 }
@@ -222,7 +222,7 @@ pub async fn check_partner_status(
                     "Can not connect to partner so this agent go to master mode,OE: {}",
                     e
                 );
-                *state.lock() = State::Master;
+                *state.lock().await = State::Master;
             }
         }
         tokio::time::sleep(ping_duration).await;
@@ -255,15 +255,15 @@ pub async fn process_incoming(
                     );
                     if message == "What's up?\n" {
                         log::info!("whats up message received!!!!");
-                        if *state.lock() != State::Slave {
+                        if *state.lock().await != State::Slave {
                             match socket
                                 .write_all(&format!("I'm master\n{}", config_hash).as_bytes())
                                 .await
                             {
                                 Ok(_) => {
                                     log::info!("'I'm master' message sent successfully");
-                                    if *state.lock() == State::MasterWaiting {
-                                        *state.lock() = State::Master;
+                                    if *state.lock().await == State::MasterWaiting {
+                                        *state.lock().await = State::Master;
                                         log::warn!("Agent from MasterWaiting go to Master mode")
                                     }
                                 }
@@ -294,7 +294,7 @@ pub async fn process_incoming(
                             }
                         }
                     } else if message == "init_db_track_change" {
-                        let data = serde_json::to_string(&*db_track_change.lock()).log_or(
+                        let data = serde_json::to_string(&*db_track_change.lock().await).log_or(
                             "Can not convert db_track_change object to string",
                             "".to_string(),
                         );
@@ -312,7 +312,7 @@ pub async fn process_incoming(
                             Ok(data)=> {
                                 match serde_json::from_str(&data) {
                                     Ok(json) => {
-                                        *db_track_change.lock() = json;
+                                        *db_track_change.lock().await = json;
                                         std::fs::write("/var/siem-db-connector/db_track_change.json", data).log_or("Unable to write to db_track_change.json", ());
                                     },
                                     Err(e) => log::error!("Can not convert db_track_change data received over net to json, OE: {}",e)
